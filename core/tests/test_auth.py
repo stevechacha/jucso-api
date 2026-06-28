@@ -189,3 +189,26 @@ class AuthFlowTests(TestCase):
         self.client.force_authenticate(user=temp_user)
         complaints = self.client.get("/api/complaints/")
         self.assertEqual(complaints.status_code, status.HTTP_200_OK)
+
+    def test_admin_can_publish_news(self):
+        admin = User.objects.create_user(
+            username="admin-news",
+            reg_number="ADMIN/NEWS",
+            email="admin.news@jucso.ac.tz",
+            password="SecurePass123!",
+            first_name="News",
+            last_name="Admin",
+            role="admin",
+        )
+        self.client.force_authenticate(user=admin)
+        response = self.client.post(
+            "/api/admin/news/",
+            {
+                "title": "Exam Timetable Released",
+                "excerpt": "Semester 1 exam timetable is now available on the portal.",
+                "tag": "Notice",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.json()["title"], "Exam Timetable Released")

@@ -13,6 +13,7 @@ from core.models import (
     EventRegistration,
     Ministry,
     NewsItem,
+    NewsTag,
     Suggestion,
     UserRole,
 )
@@ -324,6 +325,13 @@ class AdminDocumentCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=300)
     file = serializers.FileField()
     file_type = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    published_at = serializers.DateField(required=False)
+
+
+class AdminNewsCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=300, trim_whitespace=True)
+    excerpt = serializers.CharField(trim_whitespace=True)
+    tag = serializers.ChoiceField(choices=NewsTag.choices)
     published_at = serializers.DateField(required=False)
 
 

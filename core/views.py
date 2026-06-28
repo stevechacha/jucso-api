@@ -26,6 +26,7 @@ from core.permissions import AUTHENTICATED, IsAdminRole, IsLeader, IsStudent, Po
 from core.querysets import complaints_for_user, suggestions_for_user
 from core.serializers import (
     AdminDocumentCreateSerializer,
+    AdminNewsCreateSerializer,
     AdminUserSerializer,
     ClubSerializer,
     ChangePasswordSerializer,
@@ -493,6 +494,27 @@ class AdminDocumentCreateView(views.APIView):
         )
         return Response(
             DocumentSerializer(document, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminNewsCreateView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def post(self, request):
+        serializer = AdminNewsCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        item = NewsItem.objects.create(
+            title=data["title"],
+            excerpt=data["excerpt"],
+            tag=data["tag"],
+            published_at=data.get("published_at") or timezone.localdate(),
+            is_published=True,
+        )
+        return Response(
+            NewsItemSerializer(item).data,
             status=status.HTTP_201_CREATED,
         )
 
