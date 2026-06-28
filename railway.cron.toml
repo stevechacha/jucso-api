@@ -1,0 +1,12 @@
+# Railway cron service configuration
+# Create a separate Railway service pointing at jucso-api with this config file
+# (Settings → Config-as-code → railway.cron.toml) or duplicate service with cron schedule.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "sh scripts/run_daily_jobs.sh"
+cronSchedule = "0 2 * * *"
+restartPolicyType = "never"

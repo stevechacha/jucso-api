@@ -183,9 +183,14 @@ SUPABASE_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "jucso-uploa
 SUPABASE_SIGNED_URL_TTL = int(os.environ.get("SUPABASE_SIGNED_URL_TTL", "3600"))
 
 COMPLAINT_SLA_DAYS = int(os.environ.get("COMPLAINT_SLA_DAYS", "7"))
+SUGGESTION_SLA_DAYS = int(os.environ.get("SUGGESTION_SLA_DAYS", "7"))
 ADMIN_NOTIFICATION_EMAIL = os.environ.get("ADMIN_NOTIFICATION_EMAIL", "")
 _allowed_domains = os.environ.get("ALLOWED_EMAIL_DOMAINS", "")
 ALLOWED_EMAIL_DOMAINS = [d.strip() for d in _allowed_domains.split(",") if d.strip()]
+STUDENT_REGISTRY_API_URL = os.environ.get("STUDENT_REGISTRY_API_URL", "").strip()
+STUDENT_REGISTRY_API_KEY = os.environ.get("STUDENT_REGISTRY_API_KEY", "").strip()
+STUDENT_REGISTRY_CSV = os.environ.get("STUDENT_REGISTRY_CSV", "").strip()
+BACKUP_OUTPUT_PATH = os.environ.get("BACKUP_OUTPUT_PATH", "/tmp/jucso-backup.json")
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
 if SENTRY_DSN:

@@ -143,12 +143,36 @@ class Suggestion(models.Model):
     )
     response = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    sla_notified_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
 
+    @property
+    def is_overdue(self) -> bool:
+        from django.utils import timezone
+
+        if self.status == SuggestionStatus.IMPLEMENTED or not self.due_at:
+            return False
+        return timezone.now() > self.due_at
+
     def __str__(self) -> str:
         return self.title
+
+
+class CronJobLog(models.Model):
+    job_name = models.CharField(max_length=100)
+    ran_at = models.DateTimeField(auto_now_add=True)
+    detail = models.TextField(blank=True)
+    success = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["-ran_at"]
+
+    def __str__(self) -> str:
+        return f"{self.job_name} @ {self.ran_at:%Y-%m-%d %H:%M}"
 
 
 class Club(models.Model):

@@ -21,6 +21,7 @@ from core.models import (
     ComplaintCategory,
     ComplaintStatus,
     ContactMessage,
+    CronJobLog,
     Document,
     Event,
     EventRegistration,
@@ -32,6 +33,7 @@ from core.models import (
 )
 from core.permissions import AUTHENTICATED, IsAdminRole, IsLeader, IsStudent, PortalAccessPermission
 from core.querysets import complaints_for_user, suggestions_for_user
+from core.registry import registry_enabled
 from core.serializers import (
     AdminClubCreateSerializer,
     AdminClubUpdateSerializer,
@@ -514,7 +516,17 @@ class SuggestionListCreateView(generics.ListCreateAPIView):
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        return Suggestion.objects.create(student=self.request.user, **serializer.validated_data)
+        from datetime import timedelta
+
+        from django.conf import settings
+        from django.utils import timezone
+
+        sla_days = getattr(settings, "SUGGESTION_SLA_DAYS", 7)
+        return Suggestion.objects.create(
+            student=self.request.user,
+            due_at=timezone.now() + timedelta(days=sla_days),
+            **serializer.validated_data,
+        )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -808,6 +820,8 @@ class TransparencyStatsView(views.APIView):
         all_suggestions = Suggestion.objects.all()
         total_suggestions = all_suggestions.count()
         implemented_suggestions = all_suggestions.filter(status=SuggestionStatus.IMPLEMENTED).count()
+        now = timezone.now()
+        open_suggestions = all_suggestions.exclude(status=SuggestionStatus.IMPLEMENTED)
         return Response(
             {
                 "total_complaints": total,
@@ -817,7 +831,8 @@ class TransparencyStatsView(views.APIView):
                 "ministry_stats": ministry_stats,
                 "total_suggestions": total_suggestions,
                 "implemented_suggestions": implemented_suggestions,
-                "pending_suggestions": all_suggestions.exclude(status=SuggestionStatus.IMPLEMENTED).count(),
+                "pending_suggestions": open_suggestions.count(),
+                "overdue_suggestions": open_suggestions.filter(due_at__lt=now).count(),
                 "suggestion_review_rate": round((implemented_suggestions / total_suggestions) * 100)
                 if total_suggestions
                 else 0,
@@ -1109,6 +1124,10 @@ class AdminSystemStatusView(views.APIView):
         if settings.EMAIL_BACKEND.endswith("console.EmailBackend"):
             email_configured = settings.DEBUG
 
+        now = timezone.now()
+        open_complaints = Complaint.objects.exclude(status=ComplaintStatus.RESOLVED)
+        open_suggestions = Suggestion.objects.exclude(status=SuggestionStatus.IMPLEMENTED)
+
         return Response(
             {
                 "api": "ok",
@@ -1120,8 +1139,22 @@ class AdminSystemStatusView(views.APIView):
                     and getattr(settings, "SMS_USERNAME", "")
                 ),
                 "storage_configured": bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY),
+                "registry_configured": registry_enabled(),
                 "debug": settings.DEBUG,
                 "ssl_enabled": not settings.DEBUG,
+                "overdue_complaints": open_complaints.filter(due_at__lt=now).count(),
+                "overdue_suggestions": open_suggestions.filter(due_at__lt=now).count(),
+                "open_complaints": open_complaints.count(),
+                "pending_suggestions": open_suggestions.count(),
+                "cron_runs": [
+                    {
+                        "job_name": run.job_name,
+                        "ran_at": run.ran_at.isoformat(),
+                        "detail": run.detail,
+                        "success": run.success,
+                    }
+                    for run in CronJobLog.objects.order_by("-ran_at")[:10]
+                ],
             }
         )
 

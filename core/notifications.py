@@ -193,6 +193,40 @@ def notify_overdue_complaint(complaint: Complaint) -> None:
     )
 
 
+def notify_overdue_suggestion(suggestion: Suggestion) -> None:
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    recipients = set(_admin_notification_emails())
+    for email in User.objects.filter(role="executive", is_active=True).exclude(email="").values_list("email", flat=True):
+        recipients.add(email)
+
+    if not recipients:
+        return
+
+    frontend = settings.FRONTEND_URL.rstrip("/")
+    due = suggestion.due_at.strftime("%b %d, %Y") if suggestion.due_at else "N/A"
+    subject = f"Overdue suggestion {suggestion.pk:03d} — review required"
+    lines = [
+        f'Suggestion "{suggestion.title}" has exceeded the {getattr(settings, "SUGGESTION_SLA_DAYS", 7)}-day review SLA.',
+        "",
+        f"Student: {suggestion.student.display_name} ({suggestion.student.reg_number})",
+        f"Status: {suggestion.status}",
+        f"Due date: {due}",
+        "",
+        f"Review in portal: {frontend}/dashboard",
+        "",
+        "— JUCSO Digital Portal",
+    ]
+    send_mail(
+        subject,
+        "\n".join(lines),
+        settings.DEFAULT_FROM_EMAIL,
+        list(recipients),
+        fail_silently=True,
+    )
+
+
 def send_complaint_submitted_email(complaint: Complaint) -> None:
     student = complaint.student
     if not student.email:

@@ -158,6 +158,20 @@ class StudentRegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("This registration number is already registered.")
         return reg
 
+    def validate(self, attrs):
+        from core.registry import registry_enabled, verify_student_registry
+
+        if registry_enabled():
+            ok, message = verify_student_registry(
+                reg_number=attrs["reg_number"],
+                email=attrs.get("email", ""),
+                first_name=attrs.get("first_name", ""),
+                last_name=attrs.get("last_name", ""),
+            )
+            if not ok:
+                raise serializers.ValidationError({"reg_number": message})
+        return attrs
+
     def validate_email(self, value: str) -> str:
         email = value.strip().lower()
         if User.objects.filter(email__iexact=email).exists():
@@ -301,16 +315,23 @@ class SuggestionSerializer(serializers.ModelSerializer):
     id = serializers.SerializerMethodField()
     student_name = serializers.CharField(source="student.display_name", read_only=True)
     date = serializers.SerializerMethodField()
+    due_at = serializers.SerializerMethodField()
+    is_overdue = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Suggestion
-        fields = ("id", "title", "description", "student_name", "date", "status", "response")
+        fields = ("id", "title", "description", "student_name", "date", "due_at", "is_overdue", "status", "response")
 
     def get_id(self, obj: Suggestion) -> str:
         return f"SUG-{obj.pk:03d}"
 
     def get_date(self, obj: Suggestion) -> str:
         return obj.created_at.strftime("%b %d, %Y")
+
+    def get_due_at(self, obj: Suggestion) -> str | None:
+        if not obj.due_at:
+            return None
+        return obj.due_at.strftime("%b %d, %Y")
 
 
 class SuggestionUpdateSerializer(serializers.ModelSerializer):

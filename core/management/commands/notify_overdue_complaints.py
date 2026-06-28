@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from core.cron_log import log_cron_run
 from core.models import Complaint, ComplaintStatus
 from core.notifications import notify_overdue_complaint
 
@@ -22,4 +23,6 @@ class Command(BaseCommand):
             complaint.save(update_fields=["sla_notified_at"])
             count += 1
 
-        self.stdout.write(self.style.SUCCESS(f"Sent {count} overdue complaint alert(s)."))
+        detail = f"Sent {count} overdue complaint alert(s)."
+        log_cron_run(job_name="notify_overdue_complaints", detail=detail, success=True)
+        self.stdout.write(self.style.SUCCESS(detail))
