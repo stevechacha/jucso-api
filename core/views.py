@@ -27,9 +27,12 @@ from core.permissions import AUTHENTICATED, IsAdminRole, IsLeader, IsStudent, Po
 from core.querysets import complaints_for_user, suggestions_for_user
 from core.serializers import (
     AdminClubCreateSerializer,
+    AdminClubUpdateSerializer,
     AdminContactMessageSerializer,
+    AdminContactMessageUpdateSerializer,
     AdminDocumentCreateSerializer,
     AdminEventCreateSerializer,
+    AdminEventUpdateSerializer,
     AdminNewsCreateSerializer,
     AdminNewsUpdateSerializer,
     AdminUserSerializer,
@@ -45,6 +48,7 @@ from core.serializers import (
     DocumentSerializer,
     EventSerializer,
     LoginSerializer,
+    LeadershipMemberSerializer,
     MinistrySerializer,
     NewsItemSerializer,
     PasswordResetConfirmSerializer,
@@ -64,6 +68,23 @@ from core.storage import StorageError, get_storage
 from core.throttling import AuthRateThrottle
 
 User = get_user_model()
+
+
+def _initials_for_name(name: str) -> str:
+    parts = [p for p in name.split() if p]
+    if not parts:
+        return "JU"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return f"{parts[0][0]}{parts[-1][0]}".upper()
+
+
+def _leadership_role_label(user: User) -> str:
+    if user.role == UserRole.MINISTER:
+        return f"{user.ministry} Minister" if user.ministry else "Minister"
+    if user.role == UserRole.EXECUTIVE:
+        return "Executive"
+    return user.get_role_display()
 
 
 def _format_file_size(num_bytes: int) -> str:
@@ -495,6 +516,28 @@ class EventRegisterView(views.APIView):
         return Response(EventSerializer(event, context={"request": request}).data)
 
 
+class LeadershipListView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        leaders = User.objects.filter(
+            role__in=[UserRole.MINISTER, UserRole.EXECUTIVE],
+            is_active=True,
+        ).order_by("role", "ministry", "first_name")
+
+        payload = [
+            {
+                "name": user.display_name,
+                "role": _leadership_role_label(user),
+                "ministry": user.ministry or "",
+                "initials": _initials_for_name(user.display_name),
+            }
+            for user in leaders
+        ]
+        return Response(LeadershipMemberSerializer(payload, many=True).data)
+
+
 class NewsListView(generics.ListAPIView):
     serializer_class = NewsItemSerializer
     permission_classes = [AllowAny]
@@ -725,6 +768,22 @@ class AdminContactMessageListView(generics.ListAPIView):
     queryset = ContactMessage.objects.all().order_by("-created_at")
 
 
+class AdminContactMessageDetailView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def patch(self, request, pk: int):
+        try:
+            message = ContactMessage.objects.get(pk=pk)
+        except ContactMessage.DoesNotExist:
+            return Response({"detail": "Message not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminContactMessageUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        message.is_read = serializer.validated_data["is_read"]
+        message.save(update_fields=["is_read"])
+        return Response(AdminContactMessageSerializer(message).data)
+
+
 class AdminClubCreateView(views.APIView):
     permission_classes = [*AUTHENTICATED, IsAdminRole]
 
@@ -744,6 +803,19 @@ class AdminClubCreateView(views.APIView):
 
 class AdminClubDetailView(views.APIView):
     permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def patch(self, request, pk: int):
+        try:
+            club = Club.objects.get(pk=pk)
+        except Club.DoesNotExist:
+            return Response({"detail": "Club not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminClubUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(club, field, value)
+        club.save()
+        return Response(ClubSerializer(club, context={"request": request}).data)
 
     def delete(self, request, pk: int):
         try:
@@ -775,6 +847,19 @@ class AdminEventCreateView(views.APIView):
 
 class AdminEventDetailView(views.APIView):
     permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def patch(self, request, pk: int):
+        try:
+            event = Event.objects.get(pk=pk)
+        except Event.DoesNotExist:
+            return Response({"detail": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminEventUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(event, field, value)
+        event.save()
+        return Response(EventSerializer(event, context={"request": request}).data)
 
     def delete(self, request, pk: int):
         try:

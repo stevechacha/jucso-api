@@ -418,19 +418,45 @@ class AdminEventCreateSerializer(serializers.Serializer):
     capacity = serializers.IntegerField(min_value=1)
 
 
+class AdminClubUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200, trim_whitespace=True, required=False)
+    description = serializers.CharField(trim_whitespace=True, required=False)
+    leader = serializers.CharField(max_length=100, trim_whitespace=True, required=False)
+    category = serializers.CharField(max_length=50, trim_whitespace=True, required=False)
+
+
+class AdminEventUpdateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=200, trim_whitespace=True, required=False)
+    description = serializers.CharField(trim_whitespace=True, required=False)
+    location = serializers.CharField(max_length=200, trim_whitespace=True, required=False)
+    event_date = serializers.DateField(required=False)
+    capacity = serializers.IntegerField(min_value=1, required=False)
+
+
+class LeadershipMemberSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    role = serializers.CharField()
+    ministry = serializers.CharField(allow_blank=True)
+    initials = serializers.CharField()
+
+
 class AdminContactMessageSerializer(serializers.ModelSerializer):
     id = serializers.SerializerMethodField()
     date = serializers.SerializerMethodField()
 
     class Meta:
         model = ContactMessage
-        fields = ("id", "name", "email", "subject", "message", "date")
+        fields = ("id", "name", "email", "subject", "message", "date", "is_read")
 
     def get_id(self, obj: ContactMessage) -> str:
         return f"MSG-{obj.pk:04d}"
 
     def get_date(self, obj: ContactMessage) -> str:
         return obj.created_at.strftime("%b %d, %Y %H:%M")
+
+
+class AdminContactMessageUpdateSerializer(serializers.Serializer):
+    is_read = serializers.BooleanField()
 
 
 class ContactMessageSerializer(serializers.ModelSerializer):

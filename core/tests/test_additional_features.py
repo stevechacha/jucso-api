@@ -113,3 +113,75 @@ class AdditionalFeaturesTests(TestCase):
         event.refresh_from_db()
         self.assertFalse(club.is_active)
         self.assertFalse(event.is_active)
+
+    def test_leadership_list_is_public(self):
+        User.objects.create_user(
+            username="minister-lead",
+            reg_number="MIN/ACAD/040",
+            email="lead.minister@jucso.ac.tz",
+            password="SecurePass123!",
+            first_name="Lead",
+            last_name="Minister",
+            role="minister",
+            ministry="Academics",
+        )
+        response = self.client.get("/api/leadership/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(len(response.data), 1)
+        self.assertIn("initials", response.data[0])
+
+    def test_admin_can_mark_contact_message_read(self):
+        from core.models import ContactMessage
+
+        message = ContactMessage.objects.create(
+            name="Jane",
+            email="jane@example.com",
+            subject="Hello",
+            message="Need help",
+        )
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            f"/api/admin/contact-messages/{message.pk}/",
+            {"is_read": True},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        message.refresh_from_db()
+        self.assertTrue(message.is_read)
+
+    def test_admin_can_update_club(self):
+        club = Club.objects.create(
+            name="Chess Club",
+            description="Strategy games",
+            leader="Sam",
+            category="Academic",
+            is_active=True,
+        )
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            f"/api/admin/clubs/{club.pk}/",
+            {"leader": "Alex"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        club.refresh_from_db()
+        self.assertEqual(club.leader, "Alex")
+
+    def test_admin_can_update_event(self):
+        event = Event.objects.create(
+            title="Open Day",
+            description="Welcome",
+            location="Hall",
+            event_date="2026-10-01",
+            capacity=50,
+            is_active=True,
+        )
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            f"/api/admin/events/{event.pk}/",
+            {"capacity": 120},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        event.refresh_from_db()
+        self.assertEqual(event.capacity, 120)
