@@ -29,13 +29,10 @@ class UserSerializer(serializers.ModelSerializer):
         return obj.display_name
 
 
-from core.models import UserRole
-
-
 class LoginSerializer(serializers.Serializer):
     reg_number = serializers.CharField()
     password = serializers.CharField(write_only=True)
-    role = serializers.ChoiceField(choices=UserRole.choices)
+    portal = serializers.ChoiceField(choices=[("student", "Student"), ("staff", "Staff")])
 
 
 class MinistrySerializer(serializers.ModelSerializer):

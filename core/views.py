@@ -18,6 +18,7 @@ from core.models import (
     Ministry,
     NewsItem,
     Suggestion,
+    UserRole,
 )
 from core.permissions import IsAdminRole, IsLeader
 from core.serializers import (
@@ -38,6 +39,8 @@ from core.serializers import (
 from core.services import ministry_name_for_category, next_tracking_id
 
 User = get_user_model()
+
+STAFF_ROLES = {UserRole.MINISTER, UserRole.EXECUTIVE, UserRole.ADMIN}
 
 
 class HealthView(views.APIView):
@@ -73,16 +76,22 @@ class LoginView(views.APIView):
         serializer.is_valid(raise_exception=True)
         reg_number = serializer.validated_data["reg_number"].strip()
         password = serializer.validated_data["password"]
-        role = serializer.validated_data["role"]
+        portal = serializer.validated_data["portal"]
 
         try:
             user = User.objects.get(reg_number=reg_number)
         except User.DoesNotExist:
             return Response({"detail": "Registration number not found."}, status=status.HTTP_401_UNAUTHORIZED)
 
-        if user.role != role:
+        if portal == "student" and user.role != UserRole.STUDENT:
             return Response(
-                {"detail": f"This account is not a {role} account. Select role: \"{user.role}\"."},
+                {"detail": "This account uses the Staff Portal. Please sign in there."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if portal == "staff" and user.role not in STAFF_ROLES:
+            return Response(
+                {"detail": "This account uses the Student Portal. Please sign in there."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
