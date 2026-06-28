@@ -15,6 +15,7 @@ from core.models import (
     NewsItem,
     NewsTag,
     Suggestion,
+    SuggestionStatus,
     UserRole,
 )
 
@@ -210,14 +211,25 @@ class SuggestionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Suggestion
-        fields = ("id", "title", "description", "student_name", "date", "status")
-        read_only_fields = ("id", "student_name", "date", "status")
+        fields = ("id", "title", "description", "student_name", "date", "status", "response")
 
     def get_id(self, obj: Suggestion) -> str:
         return f"SUG-{obj.pk:03d}"
 
     def get_date(self, obj: Suggestion) -> str:
         return obj.created_at.strftime("%b %d, %Y")
+
+
+class SuggestionUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Suggestion
+        fields = ("status", "response")
+
+    def validate_status(self, value: str) -> str:
+        valid = {choice.value for choice in SuggestionStatus}
+        if value not in valid:
+            raise serializers.ValidationError("Invalid suggestion status.")
+        return value
 
 
 class SuggestionCreateSerializer(serializers.ModelSerializer):
@@ -350,3 +362,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
     def get_name(self, obj: User) -> str:
         return obj.display_name
+
+
+class AdminUserUpdateSerializer(serializers.Serializer):
+    is_active = serializers.BooleanField()

@@ -28,6 +28,7 @@ from core.serializers import (
     AdminDocumentCreateSerializer,
     AdminNewsCreateSerializer,
     AdminUserSerializer,
+    AdminUserUpdateSerializer,
     ClubSerializer,
     ChangePasswordSerializer,
     ComplaintCreateSerializer,
@@ -45,9 +46,11 @@ from core.serializers import (
     StudentRegisterSerializer,
     SuggestionCreateSerializer,
     SuggestionSerializer,
+    SuggestionUpdateSerializer,
     UserSerializer,
 )
 from core.services import create_complaint, create_portal_user
+from core.notifications import send_complaint_update_email
 from core.password_reset import RESET_MESSAGE, find_user_for_reset, reset_password_with_token, send_password_reset_email
 from core.storage import StorageError, get_storage
 from core.throttling import AuthRateThrottle
@@ -297,6 +300,19 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
             return [IsAuthenticated(), PortalAccessPermission(), IsLeader()]
         return super().get_permissions()
 
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        old_status = instance.status
+        old_response = instance.response
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        instance.refresh_from_db()
+        if instance.status != old_status or instance.response != old_response:
+            send_complaint_update_email(instance)
+        return Response(ComplaintSerializer(instance, context={"request": request}).data)
+
 
 class SuggestionListCreateView(generics.ListCreateAPIView):
     permission_classes = [*AUTHENTICATED]
@@ -322,6 +338,33 @@ class SuggestionListCreateView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         suggestion = self.perform_create(serializer)
         return Response(SuggestionSerializer(suggestion).data, status=status.HTTP_201_CREATED)
+
+
+class SuggestionDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [*AUTHENTICATED]
+    lookup_field = "pk"
+    lookup_url_kwarg = "pk"
+
+    def get_serializer_class(self):
+        if self.request.method in ("PUT", "PATCH"):
+            return SuggestionUpdateSerializer
+        return SuggestionSerializer
+
+    def get_queryset(self):
+        return suggestions_for_user(self.request.user)
+
+    def get_permissions(self):
+        if self.request.method in ("PUT", "PATCH"):
+            return [IsAuthenticated(), PortalAccessPermission(), IsLeader()]
+        return super().get_permissions()
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(SuggestionSerializer(instance).data)
 
 
 class ClubListView(generics.ListAPIView):
@@ -461,6 +504,28 @@ class AdminUsersView(generics.ListAPIView):
 
     def get_queryset(self):
         return User.objects.all().order_by("reg_number")
+
+
+class AdminUserUpdateView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def patch(self, request, reg_number: str):
+        reg_number = reg_number.strip("/")
+        try:
+            user = User.objects.get(reg_number=reg_number)
+        except User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminUserUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        is_active = serializer.validated_data["is_active"]
+
+        if user.pk == request.user.pk and not is_active:
+            return Response({"detail": "You cannot deactivate your own account."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.is_active = is_active
+        user.save(update_fields=["is_active"])
+        return Response(AdminUserSerializer(user).data)
 
 
 class AdminDocumentCreateView(views.APIView):
