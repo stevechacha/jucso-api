@@ -17,6 +17,8 @@ from core.models import (
     UserRole,
 )
 
+from core.storage import get_storage
+
 User = get_user_model()
 
 
@@ -138,6 +140,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
     student_reg = serializers.CharField(source="student.reg_number", read_only=True)
     ministry = serializers.CharField(source="ministry.name", read_only=True)
     date = serializers.SerializerMethodField()
+    supporting_document_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Complaint
@@ -152,17 +155,29 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "student_reg",
             "response",
             "urgent",
+            "supporting_document_url",
         )
-        read_only_fields = ("id", "ministry", "status", "date", "student_name", "student_reg", "response")
+        read_only_fields = fields
 
     def get_date(self, obj: Complaint) -> str:
         return obj.date_submitted.strftime("%b %d, %Y")
 
+    def get_supporting_document_url(self, obj: Complaint) -> str | None:
+        if obj.supporting_document_path:
+            return get_storage().signed_url(obj.supporting_document_path)
+        if obj.supporting_document:
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.supporting_document.url)
+            return obj.supporting_document.url
+        return None
 
-class ComplaintCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Complaint
-        fields = ("category", "description", "urgent", "supporting_document")
+
+class ComplaintCreateSerializer(serializers.Serializer):
+    category = serializers.CharField(max_length=100)
+    description = serializers.CharField()
+    urgent = serializers.BooleanField(required=False, default=False)
+    supporting_document = serializers.FileField(required=False, allow_empty_file=False)
 
     def validate_category(self, value: str) -> str:
         valid = {choice.value for choice in ComplaintCategory}
@@ -285,12 +300,21 @@ class DocumentSerializer(serializers.ModelSerializer):
         return obj.published_at.strftime("%b %Y")
 
     def get_download_url(self, obj: Document) -> str | None:
+        if obj.storage_path:
+            return get_storage().download_url(obj.storage_path, public=True)
         if obj.file:
             request = self.context.get("request")
             if request:
                 return request.build_absolute_uri(obj.file.url)
             return obj.file.url
         return None
+
+
+class AdminDocumentCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=300)
+    file = serializers.FileField()
+    file_type = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    published_at = serializers.DateField(required=False)
 
 
 class ContactMessageSerializer(serializers.ModelSerializer):

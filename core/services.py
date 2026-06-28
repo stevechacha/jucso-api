@@ -16,7 +16,14 @@ def ministry_slug_for_name(name: str) -> str:
 
 
 @transaction.atomic
-def create_complaint(*, student, category: str, description: str, urgent: bool = False, supporting_document=None) -> Complaint:
+def create_complaint(
+    *,
+    student,
+    category: str,
+    description: str,
+    urgent: bool = False,
+    supporting_document_path: str = "",
+) -> Complaint:
     ministry_name = ministry_name_for_category(category)
     ministry, _ = Ministry.objects.get_or_create(
         name=ministry_name,
@@ -34,7 +41,7 @@ def create_complaint(*, student, category: str, description: str, urgent: bool =
         category=category,
         description=description,
         urgent=urgent,
-        supporting_document=supporting_document,
+        supporting_document_path=supporting_document_path,
     )
 
 

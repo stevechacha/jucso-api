@@ -1,7 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework import generics, status, views
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -23,6 +25,7 @@ from core.models import (
 from core.permissions import IsAdminRole, IsLeader, IsStudent
 from core.querysets import complaints_for_user, suggestions_for_user
 from core.serializers import (
+    AdminDocumentCreateSerializer,
     AdminUserSerializer,
     ClubSerializer,
     ComplaintCreateSerializer,
@@ -44,9 +47,16 @@ from core.serializers import (
 )
 from core.services import create_complaint, create_portal_user
 from core.password_reset import RESET_MESSAGE, find_user_for_reset, reset_password_with_token, send_password_reset_email
+from core.storage import StorageError, get_storage
 from core.throttling import AuthRateThrottle
 
 User = get_user_model()
+
+
+def _format_file_size(num_bytes: int) -> str:
+    if num_bytes >= 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    return f"{max(1, num_bytes // 1024)} KB"
 
 
 class HealthView(views.APIView):
@@ -200,6 +210,7 @@ class AdminStaffCreateView(views.APIView):
 
 class ComplaintListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -217,14 +228,34 @@ class ComplaintListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        supporting_document_path = ""
+        uploaded = data.get("supporting_document")
+        if uploaded:
+            try:
+                storage = get_storage()
+                folder = f"complaints/{request.user.reg_number.replace('/', '-')}"
+                supporting_document_path = storage.upload(
+                    folder=folder,
+                    original_name=uploaded.name,
+                    file_obj=uploaded,
+                    content_type=getattr(uploaded, "content_type", None),
+                )
+            except StorageError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         complaint = create_complaint(
             student=request.user,
-            category=serializer.validated_data["category"],
-            description=serializer.validated_data["description"],
-            urgent=serializer.validated_data.get("urgent", False),
-            supporting_document=serializer.validated_data.get("supporting_document"),
+            category=data["category"],
+            description=data["description"],
+            urgent=data.get("urgent", False),
+            supporting_document_path=supporting_document_path,
         )
-        return Response(ComplaintSerializer(complaint).data, status=status.HTTP_201_CREATED)
+        return Response(
+            ComplaintSerializer(complaint, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ComplaintDetailView(generics.RetrieveUpdateAPIView):
@@ -409,6 +440,41 @@ class AdminUsersView(generics.ListAPIView):
 
     def get_queryset(self):
         return User.objects.all().order_by("reg_number")
+
+
+class AdminDocumentCreateView(views.APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = AdminDocumentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        uploaded = data["file"]
+
+        try:
+            storage_path = get_storage().upload(
+                folder="documents",
+                original_name=uploaded.name,
+                file_obj=uploaded,
+                content_type=getattr(uploaded, "content_type", None),
+            )
+        except StorageError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        extension = uploaded.name.rsplit(".", 1)[-1].upper() if "." in uploaded.name else "FILE"
+        document = Document.objects.create(
+            name=data["name"],
+            storage_path=storage_path,
+            file_type=(data.get("file_type") or extension)[:20],
+            file_size=_format_file_size(uploaded.size),
+            published_at=data.get("published_at") or timezone.localdate(),
+            is_published=True,
+        )
+        return Response(
+            DocumentSerializer(document, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AdminOverviewView(views.APIView):

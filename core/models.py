@@ -81,6 +81,7 @@ class Complaint(models.Model):
     response = models.TextField(blank=True)
     urgent = models.BooleanField(default=False)
     supporting_document = models.FileField(upload_to="complaints/", blank=True, null=True)
+    supporting_document_path = models.CharField(max_length=500, blank=True)
     date_submitted = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -198,6 +199,7 @@ class NewsItem(models.Model):
 class Document(models.Model):
     name = models.CharField(max_length=300)
     file = models.FileField(upload_to="documents/", blank=True, null=True)
+    storage_path = models.CharField(max_length=500, blank=True)
     file_type = models.CharField(max_length=20, default="PDF")
     file_size = models.CharField(max_length=20, blank=True)
     published_at = models.DateField()

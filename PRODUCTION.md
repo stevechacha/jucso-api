@@ -87,11 +87,11 @@ Redeploy after changing `VITE_API_URL` (it is baked in at build time).
 |---------|--------|
 | Forgot / reset password | ✅ Built — configure SMTP on API |
 | Email / SMS notifications | Not built |
-| Admin news & document upload | UI only |
-| Complaint file attachments | Model only; needs object storage |
-| Automated tests | Not added |
+| Admin news & document upload | ✅ Documents via API + Supabase |
+| Complaint file attachments | ✅ Uploaded to Supabase |
+| Automated tests | ✅ Auth, complaints, password reset |
 | JWT refresh flow in web | Access token only in localStorage |
-| File uploads on Railway | Ephemeral disk — use S3/R2 before enabling uploads |
+| File uploads on Railway | ✅ Supabase Storage (configure env vars) |
 
 ---
 
@@ -163,3 +163,35 @@ Configure on **`jucso-api`** so reset links reach users:
 Without SMTP, reset requests still return success but emails only appear in server logs during development.
 
 Test: Sign in → **Forgot password?** → enter email → open link in email → set new password at `/reset-password`.
+
+---
+
+## 9. Supabase Storage (file uploads)
+
+### 1. Create a Supabase project
+1. Go to [supabase.com](https://supabase.com) → New project
+2. Open **Storage** → **New bucket** → name it `jucso-uploads`
+3. For **public documents**, enable **Public bucket** (or use signed URLs only)
+
+### 2. API keys (Railway `jucso-api` variables)
+
+| Variable | Where to find it |
+|----------|------------------|
+| `SUPABASE_URL` | Project Settings → API → Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → `service_role` (secret) |
+| `SUPABASE_STORAGE_BUCKET` | `jucso-uploads` |
+| `SUPABASE_SIGNED_URL_TTL` | `3600` (complaint attachment link lifetime in seconds) |
+
+### 3. Folder layout in bucket
+
+| Path | Purpose | Access |
+|------|---------|--------|
+| `complaints/{reg-number}/…` | Student complaint attachments | Signed URLs (private) |
+| `documents/…` | Published PDFs / files | Public URLs |
+
+### 4. Test
+1. Student → **New Complaint** → attach a PDF → submit
+2. Admin → **Content** → **Upload Document**
+3. Public **Documents** page → download link works
+
+Without Supabase env vars, complaints without attachments still work; file uploads return a clear error.
