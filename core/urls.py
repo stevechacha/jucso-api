@@ -5,6 +5,7 @@ from core import views
 urlpatterns = [
     path("health/", views.HealthView.as_view(), name="health"),
     path("auth/login/", views.LoginView.as_view(), name="login"),
+    path("auth/register/", views.StudentRegisterView.as_view(), name="register"),
     path("auth/me/", views.MeView.as_view(), name="me"),
     path("complaints/", views.ComplaintListCreateView.as_view(), name="complaint-list"),
     path("complaints/<str:tracking_id>/", views.ComplaintDetailView.as_view(), name="complaint-detail"),
@@ -18,5 +19,7 @@ urlpatterns = [
     path("contact/", views.ContactCreateView.as_view(), name="contact"),
     path("stats/executive/", views.ExecutiveStatsView.as_view(), name="executive-stats"),
     path("admin/users/", views.AdminUsersView.as_view(), name="admin-users"),
+    path("admin/staff/", views.AdminStaffCreateView.as_view(), name="admin-staff-create"),
+    path("admin/ministries/", views.MinistryListView.as_view(), name="ministry-list"),
     path("admin/overview/", views.AdminOverviewView.as_view(), name="admin-overview"),
 ]

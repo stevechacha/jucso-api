@@ -31,12 +31,15 @@ from core.serializers import (
     DocumentSerializer,
     EventSerializer,
     LoginSerializer,
+    MinistrySerializer,
     NewsItemSerializer,
+    StaffCreateSerializer,
+    StudentRegisterSerializer,
     SuggestionCreateSerializer,
     SuggestionSerializer,
     UserSerializer,
 )
-from core.services import ministry_name_for_category, next_tracking_id
+from core.services import create_portal_user, ministry_name_for_category, next_tracking_id
 
 User = get_user_model()
 
@@ -112,6 +115,63 @@ class LoginView(views.APIView):
 class MeView(views.APIView):
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+
+
+class StudentRegisterView(views.APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = StudentRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = create_portal_user(
+            reg_number=data["reg_number"],
+            first_name=data["first_name"],
+            last_name=data["last_name"],
+            email=data["email"],
+            password=data["password"],
+            role=UserRole.STUDENT,
+            phone_number=data.get("phone_number", ""),
+        )
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": UserSerializer(user).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class MinistryListView(generics.ListAPIView):
+    serializer_class = MinistrySerializer
+    permission_classes = [IsAuthenticated, IsAdminRole]
+    queryset = Ministry.objects.all()
+
+
+class AdminStaffCreateView(views.APIView):
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def post(self, request):
+        serializer = StaffCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = create_portal_user(
+            reg_number=data["reg_number"],
+            first_name=data["first_name"],
+            last_name=data["last_name"],
+            email=data["email"],
+            password=data["password"],
+            role=data["role"],
+            ministry=data.get("ministry", ""),
+            phone_number=data.get("phone_number", ""),
+        )
+
+        return Response(AdminUserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
 class ComplaintListCreateView(generics.ListCreateAPIView):

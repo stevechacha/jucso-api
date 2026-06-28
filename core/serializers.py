@@ -35,6 +35,59 @@ class LoginSerializer(serializers.Serializer):
     portal = serializers.ChoiceField(choices=[("student", "Student"), ("staff", "Staff")])
 
 
+class StudentRegisterSerializer(serializers.Serializer):
+    reg_number = serializers.CharField(max_length=50)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=6)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+
+    def validate_reg_number(self, value: str) -> str:
+        reg = value.strip()
+        if User.objects.filter(reg_number=reg).exists():
+            raise serializers.ValidationError("This registration number is already registered.")
+        return reg
+
+    def validate_email(self, value: str) -> str:
+        email = value.strip().lower()
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return email
+
+
+class StaffCreateSerializer(serializers.Serializer):
+    reg_number = serializers.CharField(max_length=50)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=6)
+    role = serializers.ChoiceField(choices=[("minister", "Minister"), ("executive", "Executive")])
+    ministry = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+
+    def validate_reg_number(self, value: str) -> str:
+        reg = value.strip()
+        if User.objects.filter(reg_number=reg).exists():
+            raise serializers.ValidationError("This PF number is already registered.")
+        return reg
+
+    def validate_email(self, value: str) -> str:
+        email = value.strip().lower()
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return email
+
+    def validate(self, attrs):
+        role = attrs.get("role")
+        ministry = (attrs.get("ministry") or "").strip()
+        if role == "minister" and not ministry:
+            raise serializers.ValidationError({"ministry": "Ministry is required for ministers."})
+        if role == "executive":
+            attrs["ministry"] = ""
+        return attrs
+
+
 class MinistrySerializer(serializers.ModelSerializer):
     class Meta:
         model = Ministry
