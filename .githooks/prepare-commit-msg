@@ -1,0 +1,7 @@
+#!/bin/sh
+# Remove Cursor attribution trailers so cursoragent is not added as a GitHub contributor.
+if [ -n "$1" ] && [ -f "$1" ]; then
+  sed -i '' '/cursoragent@cursor\.com/d' "$1" 2>/dev/null || sed -i '/cursoragent@cursor\.com/d' "$1"
+  sed -i '' '/^Co-authored-by: Cursor /d' "$1" 2>/dev/null || sed -i '/^Co-authored-by: Cursor /d' "$1"
+  sed -i '' '/^Made-with: Cursor$/d' "$1" 2>/dev/null || sed -i '/^Made-with: Cursor$/d' "$1"
+fi
