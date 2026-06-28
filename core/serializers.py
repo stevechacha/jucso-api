@@ -7,6 +7,7 @@ from core.models import (
     ClubMembership,
     Complaint,
     ComplaintCategory,
+    ComplaintStatus,
     ContactMessage,
     Document,
     Event,
@@ -167,6 +168,7 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "student_reg",
             "response",
             "urgent",
+            "is_confidential",
             "supporting_document_url",
         )
         read_only_fields = fields
@@ -198,10 +200,20 @@ class ComplaintCreateSerializer(serializers.Serializer):
         return value
 
 
-class ComplaintUpdateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Complaint
-        fields = ("status", "response")
+class ComplaintUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=ComplaintStatus.choices, required=False)
+    response = serializers.CharField(required=False, allow_blank=True)
+    ministry = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide at least one field to update.")
+        ministry = (attrs.get("ministry") or "").strip()
+        if ministry and not Ministry.objects.filter(name=ministry).exists():
+            raise serializers.ValidationError({"ministry": "Unknown ministry."})
+        if ministry:
+            attrs["ministry"] = ministry
+        return attrs
 
 
 class SuggestionSerializer(serializers.ModelSerializer):
@@ -345,6 +357,43 @@ class AdminNewsCreateSerializer(serializers.Serializer):
     excerpt = serializers.CharField(trim_whitespace=True)
     tag = serializers.ChoiceField(choices=NewsTag.choices)
     published_at = serializers.DateField(required=False)
+
+
+class AdminNewsUpdateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=300, trim_whitespace=True, required=False)
+    excerpt = serializers.CharField(trim_whitespace=True, required=False)
+    tag = serializers.ChoiceField(choices=NewsTag.choices, required=False)
+    is_published = serializers.BooleanField(required=False)
+
+
+class AdminClubCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=200, trim_whitespace=True)
+    description = serializers.CharField(trim_whitespace=True)
+    leader = serializers.CharField(max_length=100, trim_whitespace=True)
+    category = serializers.CharField(max_length=50, trim_whitespace=True)
+
+
+class AdminEventCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=200, trim_whitespace=True)
+    description = serializers.CharField(trim_whitespace=True)
+    location = serializers.CharField(max_length=200, trim_whitespace=True)
+    event_date = serializers.DateField()
+    capacity = serializers.IntegerField(min_value=1)
+
+
+class AdminContactMessageSerializer(serializers.ModelSerializer):
+    id = serializers.SerializerMethodField()
+    date = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ContactMessage
+        fields = ("id", "name", "email", "subject", "message", "date")
+
+    def get_id(self, obj: ContactMessage) -> str:
+        return f"MSG-{obj.pk:04d}"
+
+    def get_date(self, obj: ContactMessage) -> str:
+        return obj.created_at.strftime("%b %d, %Y %H:%M")
 
 
 class ContactMessageSerializer(serializers.ModelSerializer):

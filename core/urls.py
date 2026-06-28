@@ -29,6 +29,11 @@ urlpatterns = [
     path("admin/staff/", views.AdminStaffCreateView.as_view(), name="admin-staff-create"),
     path("admin/ministries/", views.MinistryListView.as_view(), name="ministry-list"),
     path("admin/documents/", views.AdminDocumentCreateView.as_view(), name="admin-document-create"),
+    path("admin/documents/<int:pk>/", views.AdminDocumentDetailView.as_view(), name="admin-document-detail"),
     path("admin/news/", views.AdminNewsCreateView.as_view(), name="admin-news-create"),
+    path("admin/news/<int:pk>/", views.AdminNewsDetailView.as_view(), name="admin-news-detail"),
+    path("admin/contact-messages/", views.AdminContactMessageListView.as_view(), name="admin-contact-messages"),
+    path("admin/clubs/", views.AdminClubCreateView.as_view(), name="admin-club-create"),
+    path("admin/events/", views.AdminEventCreateView.as_view(), name="admin-event-create"),
     path("admin/overview/", views.AdminOverviewView.as_view(), name="admin-overview"),
 ]

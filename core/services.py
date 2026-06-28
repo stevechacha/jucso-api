@@ -2,6 +2,8 @@ from django.db import transaction
 
 from core.models import CATEGORY_TO_MINISTRY, Complaint, ComplaintCategory, Ministry
 
+CONFIDENTIAL_CATEGORIES = frozenset({ComplaintCategory.HEALTH})
+
 
 def ministry_name_for_category(category: str) -> str:
     try:
@@ -41,6 +43,7 @@ def create_complaint(
         category=category,
         description=description,
         urgent=urgent,
+        is_confidential=category in {c.value for c in CONFIDENTIAL_CATEGORIES},
         supporting_document_path=supporting_document_path,
     )
 

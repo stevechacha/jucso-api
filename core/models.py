@@ -81,6 +81,7 @@ class Complaint(models.Model):
     )
     response = models.TextField(blank=True)
     urgent = models.BooleanField(default=False)
+    is_confidential = models.BooleanField(default=False)
     supporting_document = models.FileField(upload_to="complaints/", blank=True, null=True)
     supporting_document_path = models.CharField(max_length=500, blank=True)
     date_submitted = models.DateTimeField(auto_now_add=True)

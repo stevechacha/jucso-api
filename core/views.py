@@ -25,8 +25,12 @@ from core.models import (
 from core.permissions import AUTHENTICATED, IsAdminRole, IsLeader, IsStudent, PortalAccessPermission
 from core.querysets import complaints_for_user, suggestions_for_user
 from core.serializers import (
+    AdminClubCreateSerializer,
+    AdminContactMessageSerializer,
     AdminDocumentCreateSerializer,
+    AdminEventCreateSerializer,
     AdminNewsCreateSerializer,
+    AdminNewsUpdateSerializer,
     AdminUserSerializer,
     AdminUserUpdateSerializer,
     ClubSerializer,
@@ -205,7 +209,7 @@ class PasswordResetConfirmView(views.APIView):
 
 class MinistryListView(generics.ListAPIView):
     serializer_class = MinistrySerializer
-    permission_classes = [*AUTHENTICATED, IsAdminRole]
+    permission_classes = [*AUTHENTICATED, IsLeader]
     queryset = Ministry.objects.all().order_by("name")
 
 
@@ -301,16 +305,34 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
         return super().get_permissions()
 
     def update(self, request, *args, **kwargs):
-        partial = kwargs.pop("partial", False)
         instance = self.get_object()
         old_status = instance.status
         old_response = instance.response
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        old_ministry = instance.ministry_id
+
+        serializer = ComplaintUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
+        data = serializer.validated_data
+
+        if "status" in data:
+            instance.status = data["status"]
+        if "response" in data:
+            instance.response = data["response"]
+        if data.get("ministry"):
+            instance.ministry = Ministry.objects.get(name=data["ministry"])
+            instance.status = ComplaintStatus.PENDING
+
+        instance.save()
         instance.refresh_from_db()
-        if instance.status != old_status or instance.response != old_response:
+
+        changed = (
+            instance.status != old_status
+            or instance.response != old_response
+            or instance.ministry_id != old_ministry
+        )
+        if changed:
             send_complaint_update_email(instance)
+
         return Response(ComplaintSerializer(instance, context={"request": request}).data)
 
 
@@ -582,6 +604,86 @@ class AdminNewsCreateView(views.APIView):
             NewsItemSerializer(item).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class AdminNewsDetailView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def patch(self, request, pk: int):
+        try:
+            item = NewsItem.objects.get(pk=pk)
+        except NewsItem.DoesNotExist:
+            return Response({"detail": "News item not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminNewsUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(item, field, value)
+        item.save()
+        return Response(NewsItemSerializer(item).data)
+
+    def delete(self, request, pk: int):
+        try:
+            item = NewsItem.objects.get(pk=pk)
+        except NewsItem.DoesNotExist:
+            return Response({"detail": "News item not found."}, status=status.HTTP_404_NOT_FOUND)
+        item.is_published = False
+        item.save(update_fields=["is_published"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminDocumentDetailView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def delete(self, request, pk: int):
+        try:
+            document = Document.objects.get(pk=pk)
+        except Document.DoesNotExist:
+            return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+        document.is_published = False
+        document.save(update_fields=["is_published"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminContactMessageListView(generics.ListAPIView):
+    serializer_class = AdminContactMessageSerializer
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+    queryset = ContactMessage.objects.all().order_by("-created_at")
+
+
+class AdminClubCreateView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def post(self, request):
+        serializer = AdminClubCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        club = Club.objects.create(
+            name=data["name"],
+            description=data["description"],
+            leader=data["leader"],
+            category=data["category"],
+            is_active=True,
+        )
+        return Response(ClubSerializer(club, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class AdminEventCreateView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def post(self, request):
+        serializer = AdminEventCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        event = Event.objects.create(
+            title=data["title"],
+            description=data["description"],
+            location=data["location"],
+            event_date=data["event_date"],
+            capacity=data["capacity"],
+            is_active=True,
+        )
+        return Response(EventSerializer(event, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
 class AdminOverviewView(views.APIView):
