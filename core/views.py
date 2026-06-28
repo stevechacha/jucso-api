@@ -47,6 +47,24 @@ class HealthView(views.APIView):
         return Response({"status": "ok", "service": "jucso-api"})
 
 
+class RootView(views.APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(
+            {
+                "status": "ok",
+                "service": "jucso-api",
+                "message": "JUCSO Student Union API",
+                "endpoints": {
+                    "health": "/api/health/",
+                    "login": "/api/auth/login/",
+                    "docs": "/admin/",
+                },
+            }
+        )
+
+
 class LoginView(views.APIView):
     permission_classes = [AllowAny]
 
