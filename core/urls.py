@@ -35,5 +35,7 @@ urlpatterns = [
     path("admin/contact-messages/", views.AdminContactMessageListView.as_view(), name="admin-contact-messages"),
     path("admin/clubs/", views.AdminClubCreateView.as_view(), name="admin-club-create"),
     path("admin/events/", views.AdminEventCreateView.as_view(), name="admin-event-create"),
+    path("admin/backup/", views.AdminBackupView.as_view(), name="admin-backup"),
+    path("admin/system-status/", views.AdminSystemStatusView.as_view(), name="admin-system-status"),
     path("admin/overview/", views.AdminOverviewView.as_view(), name="admin-overview"),
 ]

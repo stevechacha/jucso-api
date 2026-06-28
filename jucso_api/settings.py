@@ -168,6 +168,12 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@jucso.ac.tz")
 
+SMS_ENABLED = os.environ.get("SMS_ENABLED", "false").lower() == "true"
+SMS_PROVIDER = os.environ.get("SMS_PROVIDER", "africas_talking")
+SMS_USERNAME = os.environ.get("SMS_USERNAME", "")
+SMS_API_KEY = os.environ.get("SMS_API_KEY", "")
+SMS_SENDER_ID = os.environ.get("SMS_SENDER_ID", "")
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "jucso-uploads")

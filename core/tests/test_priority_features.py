@@ -57,7 +57,7 @@ class PriorityFeaturesTests(TestCase):
             status=SuggestionStatus.RECEIVED,
         )
 
-    @patch("core.views.send_complaint_update_email")
+    @patch("core.views.notify_complaint_update")
     def test_complaint_update_triggers_email(self, mock_send):
         self.client.force_authenticate(user=self.minister)
         response = self.client.patch(

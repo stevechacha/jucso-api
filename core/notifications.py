@@ -1,7 +1,8 @@
 from django.conf import settings
 from django.core.mail import send_mail
 
-from core.models import Complaint
+from core.models import Complaint, Suggestion
+from core.sms import send_sms
 
 
 def send_complaint_update_email(complaint: Complaint) -> None:
@@ -37,3 +38,69 @@ def send_complaint_update_email(complaint: Complaint) -> None:
         [student.email],
         fail_silently=True,
     )
+
+
+def send_complaint_update_sms(complaint: Complaint) -> None:
+    student = complaint.student
+    if not student.phone_number:
+        return
+    message = (
+        f"JUCSO {complaint.tracking_id}: status is now {complaint.status}. "
+        f"Ministry: {complaint.ministry.name}."
+    )
+    if complaint.response:
+        message = f"{message} Response: {complaint.response[:80]}"
+    send_sms(student.phone_number, message)
+
+
+def send_suggestion_update_email(suggestion: Suggestion) -> None:
+    student = suggestion.student
+    if not student.email:
+        return
+
+    frontend = settings.FRONTEND_URL.rstrip("/")
+    subject = f"JUCSO suggestion {suggestion.pk:03d} — {suggestion.status}"
+    lines = [
+        f"Hello {student.display_name},",
+        "",
+        f'Your suggestion "{suggestion.title}" has been updated.',
+        f"Status: {suggestion.status}",
+    ]
+    if suggestion.response:
+        lines.extend(["", "Feedback from leadership:", suggestion.response])
+    lines.extend(
+        [
+            "",
+            f"Sign in to view details: {frontend}/dashboard",
+            "",
+            "— JUCSO Digital Portal",
+        ]
+    )
+
+    send_mail(
+        subject,
+        "\n".join(lines),
+        settings.DEFAULT_FROM_EMAIL,
+        [student.email],
+        fail_silently=True,
+    )
+
+
+def send_suggestion_update_sms(suggestion: Suggestion) -> None:
+    student = suggestion.student
+    if not student.phone_number:
+        return
+    message = f'JUCSO suggestion "{suggestion.title[:40]}": status is now {suggestion.status}.'
+    if suggestion.response:
+        message = f"{message} {suggestion.response[:60]}"
+    send_sms(student.phone_number, message)
+
+
+def notify_complaint_update(complaint: Complaint) -> None:
+    send_complaint_update_email(complaint)
+    send_complaint_update_sms(complaint)
+
+
+def notify_suggestion_update(suggestion: Suggestion) -> None:
+    send_suggestion_update_email(suggestion)
+    send_suggestion_update_sms(suggestion)

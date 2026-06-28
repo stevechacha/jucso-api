@@ -8,6 +8,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from core.auth import authenticate_portal_user, build_token_response
+from core.backup import build_portal_backup
 from core.models import (
     Club,
     ClubMembership,
@@ -54,7 +55,7 @@ from core.serializers import (
     UserSerializer,
 )
 from core.services import create_complaint, create_portal_user
-from core.notifications import send_complaint_update_email
+from core.notifications import notify_complaint_update, notify_suggestion_update
 from core.password_reset import RESET_MESSAGE, find_user_for_reset, reset_password_with_token, send_password_reset_email
 from core.storage import StorageError, get_storage
 from core.throttling import AuthRateThrottle
@@ -331,7 +332,7 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
             or instance.ministry_id != old_ministry
         )
         if changed:
-            send_complaint_update_email(instance)
+            notify_complaint_update(instance)
 
         return Response(ComplaintSerializer(instance, context={"request": request}).data)
 
@@ -383,9 +384,14 @@ class SuggestionDetailView(generics.RetrieveUpdateAPIView):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
+        old_status = instance.status
+        old_response = instance.response or ""
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        instance.refresh_from_db()
+        if instance.status != old_status or (instance.response or "") != old_response:
+            notify_suggestion_update(instance)
         return Response(SuggestionSerializer(instance).data)
 
 
@@ -684,6 +690,47 @@ class AdminEventCreateView(views.APIView):
             is_active=True,
         )
         return Response(EventSerializer(event, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class AdminBackupView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def post(self, request):
+        return Response(build_portal_backup())
+
+
+class AdminSystemStatusView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def get(self, request):
+        from django.conf import settings
+        from django.db import connection
+
+        db_ok = True
+        try:
+            connection.ensure_connection()
+        except Exception:
+            db_ok = False
+
+        email_configured = bool(settings.EMAIL_HOST and settings.EMAIL_HOST_USER)
+        if settings.EMAIL_BACKEND.endswith("console.EmailBackend"):
+            email_configured = settings.DEBUG
+
+        return Response(
+            {
+                "api": "ok",
+                "database": "connected" if db_ok else "error",
+                "email_configured": email_configured,
+                "sms_configured": bool(
+                    getattr(settings, "SMS_ENABLED", False)
+                    and getattr(settings, "SMS_API_KEY", "")
+                    and getattr(settings, "SMS_USERNAME", "")
+                ),
+                "storage_configured": bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY),
+                "debug": settings.DEBUG,
+                "ssl_enabled": not settings.DEBUG,
+            }
+        )
 
 
 class AdminOverviewView(views.APIView):

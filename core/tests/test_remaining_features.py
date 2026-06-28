@@ -156,6 +156,34 @@ class RemainingFeaturesTests(TestCase):
         self.assertEqual(event_response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(Event.objects.filter(title="Orientation").exists())
 
+    def test_admin_can_update_news(self):
+        news = NewsItem.objects.create(
+            title="Old title",
+            excerpt="Old summary",
+            tag="Announcement",
+            published_at="2026-06-01",
+            is_published=True,
+        )
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            f"/api/admin/news/{news.pk}/",
+            {"title": "New title", "excerpt": "Updated summary"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        news.refresh_from_db()
+        self.assertEqual(news.title, "New title")
+        self.assertEqual(news.excerpt, "Updated summary")
+
+    def test_admin_can_export_backup(self):
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.post("/api/admin/backup/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("exported_at", response.data)
+        self.assertIn("complaints", response.data)
+        self.assertIn("users", response.data)
+        self.assertGreaterEqual(response.data["counts"]["users"], 3)
+
     def test_minister_can_list_ministries(self):
         self.client.force_authenticate(user=self.minister)
         response = self.client.get("/api/admin/ministries/")
