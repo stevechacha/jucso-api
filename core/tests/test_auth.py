@@ -86,3 +86,30 @@ class AuthFlowTests(TestCase):
         response = self.client.get("/api/auth/me/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["reg_number"], "JUC/2024/001")
+
+    def test_password_reset_request_returns_generic_message(self):
+        with self.settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+            response = self.client.post(
+                "/api/auth/password-reset/",
+                {"email": "student@jucso.ac.tz"},
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("detail", response.json())
+
+    def test_password_reset_confirm_updates_password(self):
+        from django.contrib.auth.tokens import default_token_generator
+        from django.utils.encoding import force_bytes
+        from django.utils.http import urlsafe_base64_encode
+
+        uid = urlsafe_base64_encode(force_bytes(self.student.pk))
+        token = default_token_generator.make_token(self.student)
+
+        response = self.client.post(
+            "/api/auth/password-reset/confirm/",
+            {"uid": uid, "token": token, "password": "NewSecurePass456!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.student.refresh_from_db()
+        self.assertTrue(self.student.check_password("NewSecurePass456!"))

@@ -85,7 +85,7 @@ Redeploy after changing `VITE_API_URL` (it is baked in at build time).
 
 | Feature | Status |
 |---------|--------|
-| Forgot / reset password | Not built |
+| Forgot / reset password | ✅ Built — configure SMTP on API |
 | Email / SMS notifications | Not built |
 | Admin news & document upload | UI only |
 | Complaint file attachments | Model only; needs object storage |
@@ -142,3 +142,24 @@ cd jucso-web
 echo "VITE_API_URL=http://localhost:8000" > .env
 npm run dev
 ```
+
+---
+
+## 8. Email (password reset)
+
+Configure on **`jucso-api`** so reset links reach users:
+
+| Variable | Example |
+|----------|---------|
+| `FRONTEND_URL` | `https://jucso-web-production.up.railway.app` |
+| `EMAIL_BACKEND` | `django.core.mail.backends.smtp.EmailBackend` |
+| `EMAIL_HOST` | Your SMTP host |
+| `EMAIL_PORT` | `587` |
+| `EMAIL_HOST_USER` | SMTP username |
+| `EMAIL_HOST_PASSWORD` | SMTP password |
+| `EMAIL_USE_TLS` | `true` |
+| `DEFAULT_FROM_EMAIL` | `noreply@jucso.ac.tz` |
+
+Without SMTP, reset requests still return success but emails only appear in server logs during development.
+
+Test: Sign in → **Forgot password?** → enter email → open link in email → set new password at `/reset-password`.

@@ -41,6 +41,30 @@ class LoginSerializer(serializers.Serializer):
         return value.strip()
 
 
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=False, allow_blank=True)
+    reg_number = serializers.CharField(max_length=50, required=False, allow_blank=True, trim_whitespace=True)
+
+    def validate(self, attrs):
+        email = (attrs.get("email") or "").strip()
+        reg_number = (attrs.get("reg_number") or "").strip()
+        if not email and not reg_number:
+            raise serializers.ValidationError("Provide your email or registration / PF number.")
+        attrs["email"] = email
+        attrs["reg_number"] = reg_number
+        return attrs
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
+
+    def validate_password(self, value: str) -> str:
+        validate_password(value)
+        return value
+
+
 class StudentRegisterSerializer(serializers.Serializer):
     reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
     first_name = serializers.CharField(max_length=150, trim_whitespace=True)

@@ -34,6 +34,8 @@ from core.serializers import (
     LoginSerializer,
     MinistrySerializer,
     NewsItemSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     StaffCreateSerializer,
     StudentRegisterSerializer,
     SuggestionCreateSerializer,
@@ -41,6 +43,7 @@ from core.serializers import (
     UserSerializer,
 )
 from core.services import create_complaint, create_portal_user
+from core.password_reset import RESET_MESSAGE, find_user_for_reset, reset_password_with_token, send_password_reset_email
 from core.throttling import AuthRateThrottle
 
 User = get_user_model()
@@ -123,6 +126,48 @@ class StudentRegisterView(views.APIView):
         )
 
         return build_token_response(user, status_code=status.HTTP_201_CREATED)
+
+
+class PasswordResetRequestView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = find_user_for_reset(email=data.get("email", ""), reg_number=data.get("reg_number", ""))
+        if user and user.email:
+            send_password_reset_email(user)
+
+        return Response({"detail": RESET_MESSAGE})
+
+
+class PasswordResetConfirmView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            reset_password_with_token(
+                uid=data["uid"],
+                token=data["token"],
+                password=data["password"],
+            )
+        except ValueError:
+            return Response(
+                {"detail": "Invalid or expired reset link. Request a new password reset."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({"detail": "Password updated. You can sign in with your new password."})
 
 
 class MinistryListView(generics.ListAPIView):
