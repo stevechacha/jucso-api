@@ -37,6 +37,43 @@ class UserSerializer(serializers.ModelSerializer):
         return obj.display_name
 
 
+class ProfileUpdateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(max_length=150, trim_whitespace=True, required=False)
+    last_name = serializers.CharField(max_length=150, trim_whitespace=True, required=False)
+    email = serializers.EmailField(required=False)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, trim_whitespace=True)
+
+    def validate_email(self, value: str) -> str:
+        email = value.strip().lower()
+        user = self.context.get("user")
+        if user and User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return email
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide at least one field to update.")
+        return attrs
+
+
+class ComplaintTrackRequestSerializer(serializers.Serializer):
+    tracking_id = serializers.CharField(max_length=20, trim_whitespace=True)
+    reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
+
+
+class ComplaintTrackSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="tracking_id", read_only=True)
+    ministry = serializers.CharField(source="ministry.name", read_only=True)
+    date = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Complaint
+        fields = ("id", "category", "ministry", "status", "date", "response")
+
+    def get_date(self, obj: Complaint) -> str:
+        return obj.date_submitted.strftime("%b %d, %Y")
+
+
 class LoginSerializer(serializers.Serializer):
     reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
     password = serializers.CharField(write_only=True, trim_whitespace=False)

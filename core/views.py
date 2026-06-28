@@ -38,6 +38,8 @@ from core.serializers import (
     ChangePasswordSerializer,
     ComplaintCreateSerializer,
     ComplaintSerializer,
+    ComplaintTrackRequestSerializer,
+    ComplaintTrackSerializer,
     ComplaintUpdateSerializer,
     ContactMessageSerializer,
     DocumentSerializer,
@@ -47,6 +49,7 @@ from core.serializers import (
     NewsItemSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    ProfileUpdateSerializer,
     StaffCreateSerializer,
     StudentRegisterSerializer,
     SuggestionCreateSerializer,
@@ -55,7 +58,7 @@ from core.serializers import (
     UserSerializer,
 )
 from core.services import create_complaint, create_portal_user
-from core.notifications import notify_complaint_update, notify_suggestion_update
+from core.notifications import notify_complaint_submitted, notify_complaint_update, notify_suggestion_update
 from core.password_reset import RESET_MESSAGE, find_user_for_reset, reset_password_with_token, send_password_reset_email
 from core.storage import StorageError, get_storage
 from core.throttling import AuthRateThrottle
@@ -123,6 +126,15 @@ class MeView(views.APIView):
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+
+    def patch(self, request):
+        serializer = ProfileUpdateSerializer(data=request.data, partial=True, context={"user": request.user})
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        for field, value in serializer.validated_data.items():
+            setattr(user, field, value)
+        user.save()
+        return Response(UserSerializer(user).data)
 
 
 class ChangePasswordView(views.APIView):
@@ -281,6 +293,7 @@ class ComplaintListCreateView(generics.ListCreateAPIView):
             urgent=data.get("urgent", False),
             supporting_document_path=supporting_document_path,
         )
+        notify_complaint_submitted(complaint)
         return Response(
             ComplaintSerializer(complaint, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -335,6 +348,25 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
             notify_complaint_update(instance)
 
         return Response(ComplaintSerializer(instance, context={"request": request}).data)
+
+
+class ComplaintTrackView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
+
+    def post(self, request):
+        serializer = ComplaintTrackRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            complaint = Complaint.objects.select_related("ministry", "student").get(
+                tracking_id=data["tracking_id"].strip().upper(),
+                student__reg_number=data["reg_number"].strip(),
+            )
+        except Complaint.DoesNotExist:
+            return Response({"detail": "No complaint found for those details."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ComplaintTrackSerializer(complaint).data)
 
 
 class SuggestionListCreateView(generics.ListCreateAPIView):
@@ -526,6 +558,42 @@ class ExecutiveStatsView(views.APIView):
         )
 
 
+class TransparencyStatsView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        complaints = Complaint.objects.all()
+        ministries = Ministry.objects.annotate(
+            total=Count("complaints"),
+            pending=Count("complaints", filter=Q(complaints__status=ComplaintStatus.PENDING)),
+            resolved=Count("complaints", filter=Q(complaints__status=ComplaintStatus.RESOLVED)),
+        ).order_by("name")
+
+        ministry_stats = [
+            {
+                "name": ministry.name,
+                "total": ministry.total,
+                "pending": ministry.pending,
+                "resolved": ministry.resolved,
+                "rate": round((ministry.resolved / ministry.total) * 100) if ministry.total else 0,
+            }
+            for ministry in ministries
+        ]
+
+        total = complaints.count()
+        resolved = complaints.filter(status=ComplaintStatus.RESOLVED).count()
+        return Response(
+            {
+                "total_complaints": total,
+                "resolved_complaints": resolved,
+                "open_complaints": complaints.exclude(status=ComplaintStatus.RESOLVED).count(),
+                "resolution_rate": round((resolved / total) * 100) if total else 0,
+                "ministry_stats": ministry_stats,
+            }
+        )
+
+
 class AdminUsersView(generics.ListAPIView):
     serializer_class = AdminUserSerializer
     permission_classes = [*AUTHENTICATED, IsAdminRole]
@@ -674,6 +742,19 @@ class AdminClubCreateView(views.APIView):
         return Response(ClubSerializer(club, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
+class AdminClubDetailView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def delete(self, request, pk: int):
+        try:
+            club = Club.objects.get(pk=pk)
+        except Club.DoesNotExist:
+            return Response({"detail": "Club not found."}, status=status.HTTP_404_NOT_FOUND)
+        club.is_active = False
+        club.save(update_fields=["is_active"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class AdminEventCreateView(views.APIView):
     permission_classes = [*AUTHENTICATED, IsAdminRole]
 
@@ -690,6 +771,19 @@ class AdminEventCreateView(views.APIView):
             is_active=True,
         )
         return Response(EventSerializer(event, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+class AdminEventDetailView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def delete(self, request, pk: int):
+        try:
+            event = Event.objects.get(pk=pk)
+        except Event.DoesNotExist:
+            return Response({"detail": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+        event.is_active = False
+        event.save(update_fields=["is_active"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminBackupView(views.APIView):

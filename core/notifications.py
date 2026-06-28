@@ -104,3 +104,48 @@ def notify_complaint_update(complaint: Complaint) -> None:
 def notify_suggestion_update(suggestion: Suggestion) -> None:
     send_suggestion_update_email(suggestion)
     send_suggestion_update_sms(suggestion)
+
+
+def send_complaint_submitted_email(complaint: Complaint) -> None:
+    student = complaint.student
+    if not student.email:
+        return
+
+    frontend = settings.FRONTEND_URL.rstrip("/")
+    subject = f"JUCSO complaint received — {complaint.tracking_id}"
+    lines = [
+        f"Hello {student.display_name},",
+        "",
+        "Your complaint has been submitted successfully.",
+        f"Tracking ID: {complaint.tracking_id}",
+        f"Category: {complaint.category}",
+        f"Ministry: {complaint.ministry.name}",
+        f"Status: {complaint.status}",
+        "",
+        f"Track progress anytime: {frontend}/track",
+        f"Sign in for full details: {frontend}/dashboard",
+        "",
+        "— JUCSO Digital Portal",
+    ]
+    send_mail(
+        subject,
+        "\n".join(lines),
+        settings.DEFAULT_FROM_EMAIL,
+        [student.email],
+        fail_silently=True,
+    )
+
+
+def send_complaint_submitted_sms(complaint: Complaint) -> None:
+    student = complaint.student
+    if not student.phone_number:
+        return
+    send_sms(
+        student.phone_number,
+        f"JUCSO complaint {complaint.tracking_id} received. Routed to {complaint.ministry.name}. Track at jucso portal.",
+    )
+
+
+def notify_complaint_submitted(complaint: Complaint) -> None:
+    send_complaint_submitted_email(complaint)
+    send_complaint_submitted_sms(complaint)
