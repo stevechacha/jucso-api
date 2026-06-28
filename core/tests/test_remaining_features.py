@@ -126,6 +126,24 @@ class RemainingFeaturesTests(TestCase):
         document.refresh_from_db()
         self.assertFalse(document.is_published)
 
+    def test_admin_can_update_document_name(self):
+        document = Document.objects.create(
+            name="Old Title",
+            file_type="PDF",
+            file_size="1 MB",
+            published_at="2026-06-01",
+            is_published=True,
+        )
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(
+            f"/api/admin/documents/{document.pk}/",
+            {"name": "Updated Title"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        document.refresh_from_db()
+        self.assertEqual(document.name, "Updated Title")
+
     def test_admin_can_create_club_and_event(self):
         self.client.force_authenticate(user=self.admin)
 

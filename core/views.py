@@ -34,6 +34,7 @@ from core.serializers import (
     AdminContactMessageSerializer,
     AdminContactMessageUpdateSerializer,
     AdminDocumentCreateSerializer,
+    AdminDocumentUpdateSerializer,
     AdminEventCreateSerializer,
     AdminEventUpdateSerializer,
     AdminNewsCreateSerializer,
@@ -794,6 +795,19 @@ class AdminNewsDetailView(views.APIView):
 
 class AdminDocumentDetailView(views.APIView):
     permission_classes = [*AUTHENTICATED, IsAdminRole]
+
+    def patch(self, request, pk: int):
+        try:
+            document = Document.objects.get(pk=pk, is_published=True)
+        except Document.DoesNotExist:
+            return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AdminDocumentUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(document, field, value)
+        document.save()
+        return Response(DocumentSerializer(document, context={"request": request}).data)
 
     def delete(self, request, pk: int):
         try:

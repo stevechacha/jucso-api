@@ -389,6 +389,10 @@ class AdminDocumentCreateSerializer(serializers.Serializer):
     published_at = serializers.DateField(required=False)
 
 
+class AdminDocumentUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=300, trim_whitespace=True, required=False)
+
+
 class AdminNewsCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=300, trim_whitespace=True)
     excerpt = serializers.CharField(trim_whitespace=True)
