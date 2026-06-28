@@ -1,11 +1,11 @@
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
 from rest_framework import generics, status, views
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
 
+from core.auth import authenticate_portal_user, build_token_response
 from core.models import (
     Club,
     ClubMembership,
@@ -20,7 +20,8 @@ from core.models import (
     Suggestion,
     UserRole,
 )
-from core.permissions import IsAdminRole, IsLeader
+from core.permissions import IsAdminRole, IsLeader, IsStudent
+from core.querysets import complaints_for_user, suggestions_for_user
 from core.serializers import (
     AdminUserSerializer,
     ClubSerializer,
@@ -39,15 +40,15 @@ from core.serializers import (
     SuggestionSerializer,
     UserSerializer,
 )
-from core.services import create_portal_user, ministry_name_for_category, next_tracking_id
+from core.services import create_complaint, create_portal_user
+from core.throttling import AuthRateThrottle
 
 User = get_user_model()
-
-STAFF_ROLES = {UserRole.MINISTER, UserRole.EXECUTIVE, UserRole.ADMIN}
 
 
 class HealthView(views.APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def get(self, request):
         return Response({"status": "ok", "service": "jucso-api"})
@@ -55,6 +56,7 @@ class HealthView(views.APIView):
 
 class RootView(views.APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
 
     def get(self, request):
         return Response(
@@ -62,9 +64,11 @@ class RootView(views.APIView):
                 "status": "ok",
                 "service": "jucso-api",
                 "message": "JUCSO Student Union API",
+                "version": "1.0.0",
                 "endpoints": {
                     "health": "/api/health/",
                     "login": "/api/auth/login/",
+                    "register": "/api/auth/register/",
                     "docs": "/admin/",
                 },
             }
@@ -73,52 +77,35 @@ class RootView(views.APIView):
 
 class LoginView(views.APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        reg_number = serializer.validated_data["reg_number"].strip()
-        password = serializer.validated_data["password"]
-        portal = serializer.validated_data["portal"]
 
-        try:
-            user = User.objects.get(reg_number=reg_number)
-        except User.DoesNotExist:
-            return Response({"detail": "Registration number not found."}, status=status.HTTP_401_UNAUTHORIZED)
-
-        if portal == "student" and user.role != UserRole.STUDENT:
-            return Response(
-                {"detail": "This account uses the Staff Portal. Please sign in there."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        if portal == "staff" and user.role not in STAFF_ROLES:
-            return Response(
-                {"detail": "This account uses the Student Portal. Please sign in there."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        authenticated = authenticate(request, username=user.username, password=password)
-        if not authenticated:
-            return Response({"detail": "Invalid password."}, status=status.HTTP_401_UNAUTHORIZED)
-
-        refresh = RefreshToken.for_user(authenticated)
-        return Response(
-            {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "user": UserSerializer(authenticated).data,
-            }
+        user, error = authenticate_portal_user(
+            reg_number=serializer.validated_data["reg_number"],
+            password=serializer.validated_data["password"],
+            portal=serializer.validated_data["portal"],
         )
+        if error:
+            return Response({"detail": error}, status=status.HTTP_401_UNAUTHORIZED)
+
+        return build_token_response(user)
 
 
 class MeView(views.APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         return Response(UserSerializer(request.user).data)
 
 
 class StudentRegisterView(views.APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
 
     def post(self, request):
         serializer = StudentRegisterSerializer(data=request.data)
@@ -135,21 +122,13 @@ class StudentRegisterView(views.APIView):
             phone_number=data.get("phone_number", ""),
         )
 
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "user": UserSerializer(user).data,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return build_token_response(user, status_code=status.HTTP_201_CREATED)
 
 
 class MinistryListView(generics.ListAPIView):
     serializer_class = MinistrySerializer
     permission_classes = [IsAuthenticated, IsAdminRole]
-    queryset = Ministry.objects.all()
+    queryset = Ministry.objects.all().order_by("name")
 
 
 class AdminStaffCreateView(views.APIView):
@@ -175,45 +154,36 @@ class AdminStaffCreateView(views.APIView):
 
 
 class ComplaintListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+
     def get_serializer_class(self):
         if self.request.method == "POST":
             return ComplaintCreateSerializer
         return ComplaintSerializer
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Complaint.objects.select_related("student", "ministry")
+        return complaints_for_user(self.request.user)
 
-        if user.role == "student":
-            return qs.filter(student=user)
-        if user.role == "minister":
-            return qs.filter(ministry__name=user.ministry)
-        return qs
-
-    def perform_create(self, serializer):
-        ministry_name = ministry_name_for_category(serializer.validated_data["category"])
-        ministry, _ = Ministry.objects.get_or_create(
-            name=ministry_name,
-            defaults={"slug": ministry_name.lower().replace(" ", "-").replace("&", "and")},
-        )
-        Complaint.objects.create(
-            tracking_id=next_tracking_id(),
-            student=self.request.user,
-            ministry=ministry,
-            **serializer.validated_data,
-        )
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsAuthenticated(), IsStudent()]
+        return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
-        if request.user.role != "student":
-            return Response({"detail": "Only students can submit complaints."}, status=status.HTTP_403_FORBIDDEN)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        complaint = Complaint.objects.filter(student=request.user).first()
+        complaint = create_complaint(
+            student=request.user,
+            category=serializer.validated_data["category"],
+            description=serializer.validated_data["description"],
+            urgent=serializer.validated_data.get("urgent", False),
+            supporting_document=serializer.validated_data.get("supporting_document"),
+        )
         return Response(ComplaintSerializer(complaint).data, status=status.HTTP_201_CREATED)
 
 
 class ComplaintDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [IsAuthenticated]
     lookup_field = "tracking_id"
     lookup_url_kwarg = "tracking_id"
 
@@ -223,39 +193,37 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
         return ComplaintSerializer
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Complaint.objects.select_related("student", "ministry")
-        if user.role == "student":
-            return qs.filter(student=user)
-        if user.role == "minister":
-            return qs.filter(ministry__name=user.ministry)
-        return qs
+        return complaints_for_user(self.request.user)
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
             return [IsAuthenticated(), IsLeader()]
-        return [IsAuthenticated()]
+        return super().get_permissions()
 
 
 class SuggestionListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated]
+
     def get_serializer_class(self):
         if self.request.method == "POST":
             return SuggestionCreateSerializer
         return SuggestionSerializer
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Suggestion.objects.select_related("student")
-        if user.role == "student":
-            return qs.filter(student=user)
-        return qs
+        return suggestions_for_user(self.request.user)
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsAuthenticated(), IsStudent()]
+        return super().get_permissions()
+
+    def perform_create(self, serializer):
+        return Suggestion.objects.create(student=self.request.user, **serializer.validated_data)
 
     def create(self, request, *args, **kwargs):
-        if request.user.role != "student":
-            return Response({"detail": "Only students can submit suggestions."}, status=status.HTTP_403_FORBIDDEN)
-        serializer = SuggestionCreateSerializer(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        suggestion = Suggestion.objects.create(student=request.user, **serializer.validated_data)
+        suggestion = self.perform_create(serializer)
         return Response(SuggestionSerializer(suggestion).data, status=status.HTTP_201_CREATED)
 
 
@@ -264,30 +232,32 @@ class ClubListView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        return Club.objects.filter(is_active=True)
+        return Club.objects.filter(is_active=True).order_by("name")
 
 
 class ClubJoinView(views.APIView):
-    def post(self, request, pk: int):
-        if request.user.role != "student":
-            return Response({"detail": "Only students can join clubs."}, status=status.HTTP_403_FORBIDDEN)
+    permission_classes = [IsAuthenticated, IsStudent]
 
+    @transaction.atomic
+    def post(self, request, pk: int):
         try:
-            club = Club.objects.get(pk=pk, is_active=True)
+            club = Club.objects.select_for_update().get(pk=pk, is_active=True)
         except Club.DoesNotExist:
             return Response({"detail": "Club not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        membership, created = ClubMembership.objects.get_or_create(club=club, student=request.user)
-        if created:
-            club.members_count += 1
-            club.save(update_fields=["members_count"])
-            joined = True
-        else:
+        membership = ClubMembership.objects.filter(club=club, student=request.user).first()
+        if membership:
             membership.delete()
             club.members_count = max(0, club.members_count - 1)
             club.save(update_fields=["members_count"])
             joined = False
+        else:
+            ClubMembership.objects.create(club=club, student=request.user)
+            club.members_count += 1
+            club.save(update_fields=["members_count"])
+            joined = True
 
+        club.refresh_from_db()
         return Response(ClubSerializer(club, context={"request": request}).data | {"joined": joined})
 
 
@@ -296,15 +266,14 @@ class EventListView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        return Event.objects.filter(is_active=True)
+        return Event.objects.filter(is_active=True).order_by("event_date")
 
 
 class EventRegisterView(views.APIView):
+    permission_classes = [IsAuthenticated, IsStudent]
+
     @transaction.atomic
     def post(self, request, pk: int):
-        if request.user.role != "student":
-            return Response({"detail": "Only students can register for events."}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             event = Event.objects.select_for_update().get(pk=pk, is_active=True)
         except Event.DoesNotExist:
@@ -331,7 +300,7 @@ class NewsListView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        qs = NewsItem.objects.filter(is_published=True)
+        qs = NewsItem.objects.filter(is_published=True).order_by("-published_at")
         tag = self.request.query_params.get("tag")
         if tag and tag != "All":
             qs = qs.filter(tag=tag)
@@ -343,12 +312,13 @@ class DocumentListView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
-        return Document.objects.filter(is_published=True)
+        return Document.objects.filter(is_published=True).order_by("-published_at")
 
 
 class ContactCreateView(generics.CreateAPIView):
     serializer_class = ContactMessageSerializer
     permission_classes = [AllowAny]
+    throttle_classes = [AuthRateThrottle]
 
 
 class ExecutiveStatsView(views.APIView):
@@ -360,20 +330,18 @@ class ExecutiveStatsView(views.APIView):
             total=Count("complaints"),
             pending=Count("complaints", filter=Q(complaints__status=ComplaintStatus.PENDING)),
             resolved=Count("complaints", filter=Q(complaints__status=ComplaintStatus.RESOLVED)),
-        )
+        ).order_by("name")
 
-        ministry_stats = []
-        for m in ministries:
-            rate = round((m.resolved / m.total) * 100) if m.total else 0
-            ministry_stats.append(
-                {
-                    "name": m.name,
-                    "total": m.total,
-                    "pending": m.pending,
-                    "resolved": m.resolved,
-                    "rate": rate,
-                }
-            )
+        ministry_stats = [
+            {
+                "name": ministry.name,
+                "total": ministry.total,
+                "pending": ministry.pending,
+                "resolved": ministry.resolved,
+                "rate": round((ministry.resolved / ministry.total) * 100) if ministry.total else 0,
+            }
+            for ministry in ministries
+        ]
 
         return Response(
             {
@@ -395,7 +363,7 @@ class AdminUsersView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get_queryset(self):
-        return User.objects.all()
+        return User.objects.all().order_by("reg_number")
 
 
 class AdminOverviewView(views.APIView):
@@ -411,6 +379,6 @@ class AdminOverviewView(views.APIView):
                 "upcoming_events": Event.objects.filter(is_active=True).count(),
                 "open_complaints": Complaint.objects.exclude(status=ComplaintStatus.RESOLVED).count(),
                 "pending_suggestions": Suggestion.objects.exclude(status="Implemented").count(),
-                "registered_students": User.objects.filter(role="student").count(),
+                "registered_students": User.objects.filter(role=UserRole.STUDENT).count(),
             }
         )

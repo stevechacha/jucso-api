@@ -1,4 +1,6 @@
-from core.models import CATEGORY_TO_MINISTRY, ComplaintCategory
+from django.db import transaction
+
+from core.models import CATEGORY_TO_MINISTRY, Complaint, ComplaintCategory, Ministry
 
 
 def ministry_name_for_category(category: str) -> str:
@@ -9,18 +11,38 @@ def ministry_name_for_category(category: str) -> str:
         return CATEGORY_TO_MINISTRY[ComplaintCategory.OTHER]
 
 
-def next_tracking_id() -> str:
-    from core.models import Complaint
+def ministry_slug_for_name(name: str) -> str:
+    return name.lower().replace(" ", "-").replace("&", "and")
 
-    last = Complaint.objects.order_by("-id").first()
+
+@transaction.atomic
+def create_complaint(*, student, category: str, description: str, urgent: bool = False, supporting_document=None) -> Complaint:
+    ministry_name = ministry_name_for_category(category)
+    ministry, _ = Ministry.objects.get_or_create(
+        name=ministry_name,
+        defaults={"slug": ministry_slug_for_name(ministry_name)},
+    )
+
+    last = Complaint.objects.select_for_update().order_by("-id").first()
     next_num = (last.id + 1) if last else 1
-    return f"JUC-{next_num:03d}"
+    tracking_id = f"JUC-{next_num:03d}"
+
+    return Complaint.objects.create(
+        tracking_id=tracking_id,
+        student=student,
+        ministry=ministry,
+        category=category,
+        description=description,
+        urgent=urgent,
+        supporting_document=supporting_document,
+    )
 
 
 def username_from_reg(reg_number: str) -> str:
     return reg_number.strip().lower().replace("/", "-").replace(" ", "-")
 
 
+@transaction.atomic
 def create_portal_user(
     *,
     reg_number: str,

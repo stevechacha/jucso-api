@@ -105,7 +105,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": "20/minute",
+    },
+    "EXCEPTION_HANDLER": "core.exceptions.api_exception_handler",
 }
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "true").lower() == "true"
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31_536_000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),

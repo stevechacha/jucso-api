@@ -1,10 +1,12 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from core.models import (
     Club,
     ClubMembership,
     Complaint,
+    ComplaintCategory,
     ContactMessage,
     Document,
     Event,
@@ -12,6 +14,7 @@ from core.models import (
     Ministry,
     NewsItem,
     Suggestion,
+    UserRole,
 )
 
 User = get_user_model()
@@ -30,18 +33,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    reg_number = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+    reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
     portal = serializers.ChoiceField(choices=[("student", "Student"), ("staff", "Staff")])
+
+    def validate_reg_number(self, value: str) -> str:
+        return value.strip()
 
 
 class StudentRegisterSerializer(serializers.Serializer):
-    reg_number = serializers.CharField(max_length=50)
-    first_name = serializers.CharField(max_length=150)
-    last_name = serializers.CharField(max_length=150)
+    reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
+    first_name = serializers.CharField(max_length=150, trim_whitespace=True)
+    last_name = serializers.CharField(max_length=150, trim_whitespace=True)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=6)
-    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, trim_whitespace=True)
 
     def validate_reg_number(self, value: str) -> str:
         reg = value.strip()
@@ -55,16 +61,20 @@ class StudentRegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("This email is already in use.")
         return email
 
+    def validate_password(self, value: str) -> str:
+        validate_password(value)
+        return value
+
 
 class StaffCreateSerializer(serializers.Serializer):
-    reg_number = serializers.CharField(max_length=50)
-    first_name = serializers.CharField(max_length=150)
-    last_name = serializers.CharField(max_length=150)
+    reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
+    first_name = serializers.CharField(max_length=150, trim_whitespace=True)
+    last_name = serializers.CharField(max_length=150, trim_whitespace=True)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, min_length=6)
-    role = serializers.ChoiceField(choices=[("minister", "Minister"), ("executive", "Executive")])
-    ministry = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
+    role = serializers.ChoiceField(choices=[(UserRole.MINISTER, "Minister"), (UserRole.EXECUTIVE, "Executive")])
+    ministry = serializers.CharField(max_length=100, required=False, allow_blank=True, trim_whitespace=True)
+    phone_number = serializers.CharField(max_length=20, required=False, allow_blank=True, trim_whitespace=True)
 
     def validate_reg_number(self, value: str) -> str:
         reg = value.strip()
@@ -78,12 +88,16 @@ class StaffCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("This email is already in use.")
         return email
 
+    def validate_password(self, value: str) -> str:
+        validate_password(value)
+        return value
+
     def validate(self, attrs):
         role = attrs.get("role")
         ministry = (attrs.get("ministry") or "").strip()
-        if role == "minister" and not ministry:
+        if role == UserRole.MINISTER and not ministry:
             raise serializers.ValidationError({"ministry": "Ministry is required for ministers."})
-        if role == "executive":
+        if role == UserRole.EXECUTIVE:
             attrs["ministry"] = ""
         return attrs
 
@@ -125,6 +139,12 @@ class ComplaintCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Complaint
         fields = ("category", "description", "urgent", "supporting_document")
+
+    def validate_category(self, value: str) -> str:
+        valid = {choice.value for choice in ComplaintCategory}
+        if value not in valid:
+            raise serializers.ValidationError("Invalid complaint category.")
+        return value
 
 
 class ComplaintUpdateSerializer(serializers.ModelSerializer):
