@@ -10,9 +10,11 @@ from rest_framework.response import Response
 from core.auth import authenticate_portal_user, build_token_response
 from core.backup import build_portal_backup
 from core.models import (
+    CATEGORY_TO_MINISTRY,
     Club,
     ClubMembership,
     Complaint,
+    ComplaintCategory,
     ComplaintStatus,
     ContactMessage,
     Document,
@@ -597,6 +599,37 @@ class ExecutiveStatsView(views.APIView):
                     complaints.filter(urgent=True).exclude(status=ComplaintStatus.RESOLVED)[:10],
                     many=True,
                 ).data,
+            }
+        )
+
+
+class ComplaintCategoriesView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(
+            [
+                {"category": category.value, "ministry": CATEGORY_TO_MINISTRY[category]}
+                for category in ComplaintCategory
+            ]
+        )
+
+
+class PublicStatsView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        total = Complaint.objects.count()
+        resolved = Complaint.objects.filter(status=ComplaintStatus.RESOLVED).count()
+        return Response(
+            {
+                "students_registered": User.objects.filter(role=UserRole.STUDENT, is_active=True).count(),
+                "ministries": Ministry.objects.count(),
+                "resolution_rate": round((resolved / total) * 100) if total else 0,
+                "active_clubs": Club.objects.filter(is_active=True).count(),
+                "upcoming_events": Event.objects.filter(is_active=True).count(),
             }
         )
 

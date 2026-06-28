@@ -185,3 +185,16 @@ class AdditionalFeaturesTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         event.refresh_from_db()
         self.assertEqual(event.capacity, 120)
+
+    def test_public_stats_are_public(self):
+        response = self.client.get("/api/stats/public/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("students_registered", response.data)
+        self.assertIn("resolution_rate", response.data)
+
+    def test_complaint_categories_are_public(self):
+        response = self.client.get("/api/complaints/categories/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(len(response.data), 1)
+        self.assertIn("category", response.data[0])
+        self.assertIn("ministry", response.data[0])
