@@ -23,6 +23,7 @@ class AdditionalFeaturesTests(TestCase):
             last_name="Student",
             role="student",
             phone_number="0711223344",
+            email_verified=True,
         )
         self.admin = User.objects.create_user(
             username="admin-additional",

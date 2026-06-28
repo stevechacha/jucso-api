@@ -15,6 +15,7 @@ class User(AbstractUser):
     ministry = models.CharField(max_length=100, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
     must_change_password = models.BooleanField(default=False)
+    email_verified = models.BooleanField(default=False)
 
     REQUIRED_FIELDS = ["email", "reg_number"]
 
@@ -86,12 +87,43 @@ class Complaint(models.Model):
     supporting_document_path = models.CharField(max_length=500, blank=True)
     date_submitted = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    sla_notified_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-date_submitted"]
 
+    @property
+    def is_overdue(self) -> bool:
+        from django.utils import timezone
+
+        if self.status == ComplaintStatus.RESOLVED or not self.due_at:
+            return False
+        return timezone.now() > self.due_at
+
     def __str__(self) -> str:
         return self.tracking_id
+
+
+class ComplaintActivity(models.Model):
+    complaint = models.ForeignKey(Complaint, on_delete=models.CASCADE, related_name="activities")
+    action = models.CharField(max_length=100)
+    detail = models.TextField(blank=True)
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="complaint_activities",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        verbose_name_plural = "complaint activities"
+
+    def __str__(self) -> str:
+        return f"{self.complaint.tracking_id}: {self.action}"
 
 
 class SuggestionStatus(models.TextChoices):

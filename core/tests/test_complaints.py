@@ -19,6 +19,7 @@ class ComplaintFlowTests(TestCase):
             first_name="Leilani",
             last_name="Mwamba",
             role="student",
+            email_verified=True,
         )
         self.minister = User.objects.create_user(
             username="min-acad-002",

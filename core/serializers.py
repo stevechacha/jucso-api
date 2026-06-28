@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
@@ -6,6 +7,7 @@ from core.models import (
     Club,
     ClubMembership,
     Complaint,
+    ComplaintActivity,
     ComplaintCategory,
     ComplaintStatus,
     ContactMessage,
@@ -30,7 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("reg_number", "name", "role", "ministry", "email", "phone_number", "must_change_password")
+        fields = ("reg_number", "name", "role", "ministry", "email", "phone_number", "must_change_password", "email_verified")
         read_only_fields = fields
 
     def get_name(self, obj: User) -> str:
@@ -61,17 +63,42 @@ class ComplaintTrackRequestSerializer(serializers.Serializer):
     reg_number = serializers.CharField(max_length=50, trim_whitespace=True)
 
 
+class ComplaintActivitySerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+    timestamp = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ComplaintActivity
+        fields = ("action", "detail", "actor_name", "timestamp")
+
+    def get_actor_name(self, obj: ComplaintActivity) -> str:
+        if obj.actor:
+            return obj.actor.display_name
+        return "System"
+
+    def get_timestamp(self, obj: ComplaintActivity) -> str:
+        return obj.created_at.strftime("%b %d, %Y %H:%M")
+
+
 class ComplaintTrackSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="tracking_id", read_only=True)
     ministry = serializers.CharField(source="ministry.name", read_only=True)
     date = serializers.SerializerMethodField()
+    is_overdue = serializers.BooleanField(read_only=True)
+    due_at = serializers.SerializerMethodField()
+    activity = ComplaintActivitySerializer(source="activities", many=True, read_only=True)
 
     class Meta:
         model = Complaint
-        fields = ("id", "category", "ministry", "status", "date", "response")
+        fields = ("id", "category", "ministry", "status", "date", "response", "is_overdue", "due_at", "activity")
 
     def get_date(self, obj: Complaint) -> str:
         return obj.date_submitted.strftime("%b %d, %Y")
+
+    def get_due_at(self, obj: Complaint) -> str | None:
+        if not obj.due_at:
+            return None
+        return obj.due_at.strftime("%b %d, %Y")
 
 
 class LoginSerializer(serializers.Serializer):
@@ -135,6 +162,12 @@ class StudentRegisterSerializer(serializers.Serializer):
         email = value.strip().lower()
         if User.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError("This email is already in use.")
+        domains = getattr(settings, "ALLOWED_EMAIL_DOMAINS", [])
+        if domains:
+            domain = email.rsplit("@", 1)[-1]
+            if domain not in domains:
+                allowed = ", ".join(f"@{d}" for d in domains)
+                raise serializers.ValidationError(f"Use your college email ({allowed}).")
         return email
 
     def validate_password(self, value: str) -> str:
@@ -190,7 +223,10 @@ class ComplaintSerializer(serializers.ModelSerializer):
     student_reg = serializers.CharField(source="student.reg_number", read_only=True)
     ministry = serializers.CharField(source="ministry.name", read_only=True)
     date = serializers.SerializerMethodField()
+    due_at = serializers.SerializerMethodField()
+    is_overdue = serializers.BooleanField(read_only=True)
     supporting_document_url = serializers.SerializerMethodField()
+    activity = ComplaintActivitySerializer(source="activities", many=True, read_only=True)
 
     class Meta:
         model = Complaint
@@ -201,17 +237,25 @@ class ComplaintSerializer(serializers.ModelSerializer):
             "ministry",
             "status",
             "date",
+            "due_at",
+            "is_overdue",
             "student_name",
             "student_reg",
             "response",
             "urgent",
             "is_confidential",
             "supporting_document_url",
+            "activity",
         )
         read_only_fields = fields
 
     def get_date(self, obj: Complaint) -> str:
         return obj.date_submitted.strftime("%b %d, %Y")
+
+    def get_due_at(self, obj: Complaint) -> str | None:
+        if not obj.due_at:
+            return None
+        return obj.due_at.strftime("%b %d, %Y")
 
     def get_supporting_document_url(self, obj: Complaint) -> str | None:
         if obj.supporting_document_path:
@@ -481,4 +525,48 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
 
 class AdminUserUpdateSerializer(serializers.Serializer):
-    is_active = serializers.BooleanField()
+    is_active = serializers.BooleanField(required=False)
+    role = serializers.ChoiceField(choices=UserRole.choices, required=False)
+    ministry = serializers.CharField(max_length=100, required=False, allow_blank=True, trim_whitespace=True)
+    first_name = serializers.CharField(max_length=150, required=False, trim_whitespace=True)
+    last_name = serializers.CharField(max_length=150, required=False, trim_whitespace=True)
+    email = serializers.EmailField(required=False)
+
+    def validate_email(self, value: str) -> str:
+        email = value.strip().lower()
+        user = self.context.get("user")
+        if user and User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return email
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide at least one field to update.")
+        role = attrs.get("role")
+        ministry = (attrs.get("ministry") or "").strip()
+        if role == UserRole.MINISTER and "ministry" in attrs and not ministry:
+            raise serializers.ValidationError({"ministry": "Ministry is required for ministers."})
+        if role == UserRole.EXECUTIVE:
+            attrs["ministry"] = ""
+        elif "ministry" in attrs:
+            attrs["ministry"] = ministry
+        return attrs
+
+
+class EmailVerifySerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+
+
+class ResendVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=False, allow_blank=True)
+    reg_number = serializers.CharField(max_length=50, required=False, allow_blank=True, trim_whitespace=True)
+
+    def validate(self, attrs):
+        email = (attrs.get("email") or "").strip()
+        reg_number = (attrs.get("reg_number") or "").strip()
+        if not email and not reg_number:
+            raise serializers.ValidationError("Provide your email or registration number.")
+        attrs["email"] = email
+        attrs["reg_number"] = reg_number
+        return attrs

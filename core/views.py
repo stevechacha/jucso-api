@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
@@ -9,6 +11,8 @@ from rest_framework.response import Response
 
 from core.auth import authenticate_portal_user, build_token_response
 from core.backup import build_portal_backup
+from core.complaint_activity import log_complaint_activity
+from core.email_verification import send_email_verification, verify_email_with_token
 from core.models import (
     CATEGORY_TO_MINISTRY,
     Club,
@@ -50,6 +54,7 @@ from core.serializers import (
     ComplaintUpdateSerializer,
     ContactMessageSerializer,
     DocumentSerializer,
+    EmailVerifySerializer,
     EventSerializer,
     LoginSerializer,
     LeadershipMemberSerializer,
@@ -58,6 +63,7 @@ from core.serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ProfileUpdateSerializer,
+    ResendVerificationSerializer,
     StaffCreateSerializer,
     StudentRegisterSerializer,
     SuggestionCreateSerializer,
@@ -66,10 +72,15 @@ from core.serializers import (
     UserSerializer,
 )
 from core.services import create_complaint, create_portal_user
-from core.notifications import notify_complaint_submitted, notify_complaint_update, notify_suggestion_update
+from core.notifications import (
+    notify_complaint_submitted,
+    notify_complaint_update,
+    notify_contact_message,
+    notify_suggestion_update,
+)
 from core.password_reset import RESET_MESSAGE, find_user_for_reset, reset_password_with_token, send_password_reset_email
 from core.storage import StorageError, get_storage
-from core.throttling import AuthRateThrottle
+from core.throttling import AuthRateThrottle, ComplaintCreateRateThrottle, ContactRateThrottle, WriteRateThrottle
 
 User = get_user_model()
 
@@ -180,6 +191,44 @@ class ChangePasswordView(views.APIView):
         return Response({"detail": "Password updated successfully.", "user": UserSerializer(request.user).data})
 
 
+class EmailVerifyView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
+
+    def post(self, request):
+        serializer = EmailVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            user = verify_email_with_token(uid=data["uid"], token=data["token"])
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "Email verified successfully.", "user": UserSerializer(user).data})
+
+
+class ResendVerificationView(views.APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [AuthRateThrottle]
+
+    def post(self, request):
+        serializer = ResendVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        user = None
+        if data.get("reg_number"):
+            user = User.objects.filter(reg_number=data["reg_number"]).first()
+        elif data.get("email"):
+            user = User.objects.filter(email__iexact=data["email"]).first()
+
+        if user and user.role == UserRole.STUDENT and not user.email_verified:
+            send_email_verification(user)
+
+        return Response({"detail": "If an unverified student account exists, a verification email has been sent."})
+
+
 class StudentRegisterView(views.APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -199,6 +248,7 @@ class StudentRegisterView(views.APIView):
             role=UserRole.STUDENT,
             phone_number=data.get("phone_number", ""),
         )
+        send_email_verification(user)
 
         return build_token_response(user, status_code=status.HTTP_201_CREATED)
 
@@ -278,6 +328,11 @@ class ComplaintListCreateView(generics.ListCreateAPIView):
     permission_classes = [*AUTHENTICATED]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def get_throttles(self):
+        if self.request.method == "POST":
+            return [ComplaintCreateRateThrottle()]
+        return super().get_throttles()
+
     def get_serializer_class(self):
         if self.request.method == "POST":
             return ComplaintCreateSerializer
@@ -292,6 +347,12 @@ class ComplaintListCreateView(generics.ListCreateAPIView):
         return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
+        if request.user.role == UserRole.STUDENT and not request.user.email_verified:
+            return Response(
+                {"detail": "Verify your email before submitting a complaint. Check your inbox or resend verification."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -355,10 +416,48 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
 
         if "status" in data:
             instance.status = data["status"]
-        if "response" in data:
+            if data["status"] == ComplaintStatus.RESOLVED:
+                log_complaint_activity(
+                    complaint=instance,
+                    action="Resolved",
+                    detail=data.get("response") or instance.response,
+                    actor=request.user,
+                )
+            elif data["status"] == ComplaintStatus.IN_PROGRESS:
+                log_complaint_activity(
+                    complaint=instance,
+                    action="In Progress",
+                    detail=data.get("response") or "",
+                    actor=request.user,
+                )
+            elif instance.status != old_status:
+                log_complaint_activity(
+                    complaint=instance,
+                    action=f"Status → {data['status']}",
+                    detail=data.get("response") or "",
+                    actor=request.user,
+                )
+        if "response" in data and data["response"] != old_response:
+            instance.response = data["response"]
+            if "status" not in data:
+                log_complaint_activity(
+                    complaint=instance,
+                    action="Response added",
+                    detail=data["response"],
+                    actor=request.user,
+                )
+        elif "response" in data:
             instance.response = data["response"]
         if data.get("ministry"):
-            instance.ministry = Ministry.objects.get(name=data["ministry"])
+            new_ministry = Ministry.objects.get(name=data["ministry"])
+            if new_ministry.pk != old_ministry:
+                log_complaint_activity(
+                    complaint=instance,
+                    action="Forwarded",
+                    detail=f"To {new_ministry.name}",
+                    actor=request.user,
+                )
+            instance.ministry = new_ministry
             instance.status = ComplaintStatus.PENDING
 
         instance.save()
@@ -385,9 +484,13 @@ class ComplaintTrackView(views.APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         try:
-            complaint = Complaint.objects.select_related("ministry", "student").get(
-                tracking_id=data["tracking_id"].strip().upper(),
-                student__reg_number=data["reg_number"].strip(),
+            complaint = (
+                Complaint.objects.select_related("ministry", "student")
+                .prefetch_related("activities")
+                .get(
+                    tracking_id=data["tracking_id"].strip().upper(),
+                    student__reg_number=data["reg_number"].strip(),
+                )
             )
         except Complaint.DoesNotExist:
             return Response({"detail": "No complaint found for those details."}, status=status.HTTP_404_NOT_FOUND)
@@ -565,7 +668,11 @@ class DocumentListView(generics.ListAPIView):
 class ContactCreateView(generics.CreateAPIView):
     serializer_class = ContactMessageSerializer
     permission_classes = [AllowAny]
-    throttle_classes = [AuthRateThrottle]
+    throttle_classes = [ContactRateThrottle]
+
+    def perform_create(self, serializer):
+        message = serializer.save()
+        notify_contact_message(message)
 
 
 class ExecutiveStatsView(views.APIView):
@@ -590,17 +697,49 @@ class ExecutiveStatsView(views.APIView):
             for ministry in ministries
         ]
 
+        now = timezone.now()
+        week_start = now - timedelta(days=7)
+        open_qs = complaints.exclude(status=ComplaintStatus.RESOLVED)
         return Response(
             {
                 "total_complaints": complaints.count(),
                 "urgent": complaints.filter(urgent=True).count(),
-                "open_issues": complaints.exclude(status=ComplaintStatus.RESOLVED).count(),
+                "open_issues": open_qs.count(),
                 "resolved": complaints.filter(status=ComplaintStatus.RESOLVED).count(),
+                "overdue": open_qs.filter(due_at__lt=now).count(),
+                "resolved_this_week": complaints.filter(
+                    status=ComplaintStatus.RESOLVED,
+                    updated_at__gte=week_start,
+                ).count(),
                 "ministry_stats": ministry_stats,
                 "urgent_issues": ComplaintSerializer(
                     complaints.filter(urgent=True).exclude(status=ComplaintStatus.RESOLVED)[:10],
                     many=True,
                 ).data,
+            }
+        )
+
+
+class MinisterWorkloadView(views.APIView):
+    permission_classes = [*AUTHENTICATED, IsLeader]
+
+    def get(self, request):
+        if request.user.role != UserRole.MINISTER:
+            return Response({"detail": "Ministers only."}, status=status.HTTP_403_FORBIDDEN)
+
+        now = timezone.now()
+        week_start = now - timedelta(days=7)
+        qs = complaints_for_user(request.user)
+        open_qs = qs.exclude(status=ComplaintStatus.RESOLVED)
+
+        return Response(
+            {
+                "open_count": open_qs.count(),
+                "resolved_this_week": qs.filter(status=ComplaintStatus.RESOLVED, updated_at__gte=week_start).count(),
+                "overdue_count": open_qs.filter(due_at__lt=now).count(),
+                "urgent_open": open_qs.filter(urgent=True).count(),
+                "pending": open_qs.filter(status=ComplaintStatus.PENDING).count(),
+                "in_progress": open_qs.filter(status=ComplaintStatus.IN_PROGRESS).count(),
             }
         )
 
@@ -625,6 +764,9 @@ class PublicStatsView(views.APIView):
     def get(self, request):
         total = Complaint.objects.count()
         resolved = Complaint.objects.filter(status=ComplaintStatus.RESOLVED).count()
+        all_suggestions = Suggestion.objects.all()
+        total_suggestions = all_suggestions.count()
+        implemented_suggestions = all_suggestions.filter(status=SuggestionStatus.IMPLEMENTED).count()
         return Response(
             {
                 "students_registered": User.objects.filter(role=UserRole.STUDENT, is_active=True).count(),
@@ -632,6 +774,8 @@ class PublicStatsView(views.APIView):
                 "resolution_rate": round((resolved / total) * 100) if total else 0,
                 "active_clubs": Club.objects.filter(is_active=True).count(),
                 "upcoming_events": Event.objects.filter(is_active=True).count(),
+                "total_suggestions": total_suggestions,
+                "implemented_suggestions": implemented_suggestions,
             }
         )
 
@@ -699,15 +843,28 @@ class AdminUserUpdateView(views.APIView):
         except User.DoesNotExist:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AdminUserUpdateSerializer(data=request.data)
+        serializer = AdminUserUpdateSerializer(data=request.data, partial=True, context={"user": user})
         serializer.is_valid(raise_exception=True)
-        is_active = serializer.validated_data["is_active"]
+        data = serializer.validated_data
 
-        if user.pk == request.user.pk and not is_active:
-            return Response({"detail": "You cannot deactivate your own account."}, status=status.HTTP_400_BAD_REQUEST)
+        if "is_active" in data:
+            is_active = data["is_active"]
+            if user.pk == request.user.pk and not is_active:
+                return Response({"detail": "You cannot deactivate your own account."}, status=status.HTTP_400_BAD_REQUEST)
+            user.is_active = is_active
 
-        user.is_active = is_active
-        user.save(update_fields=["is_active"])
+        if "role" in data:
+            user.role = data["role"]
+        if "ministry" in data:
+            user.ministry = data["ministry"]
+        if "first_name" in data:
+            user.first_name = data["first_name"]
+        if "last_name" in data:
+            user.last_name = data["last_name"]
+        if "email" in data:
+            user.email = data["email"]
+
+        user.save()
         return Response(AdminUserSerializer(user).data)
 
 

@@ -31,6 +31,7 @@ class RemainingFeaturesTests(TestCase):
             first_name="Remaining",
             last_name="Student",
             role="student",
+            email_verified=True,
         )
         self.minister = User.objects.create_user(
             username="minister-remaining",

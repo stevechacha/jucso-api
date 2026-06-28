@@ -24,6 +24,7 @@ class NotificationTests(TestCase):
             last_name="Student",
             role="student",
             phone_number="0712345678",
+            email_verified=True,
         )
         self.minister = User.objects.create_user(
             username="minister-notify",

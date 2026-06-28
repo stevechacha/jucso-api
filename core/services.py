@@ -1,6 +1,11 @@
-from django.db import transaction
+from datetime import timedelta
 
-from core.models import CATEGORY_TO_MINISTRY, Complaint, ComplaintCategory, Ministry
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
+
+from core.complaint_activity import log_complaint_activity
+from core.models import CATEGORY_TO_MINISTRY, Complaint, ComplaintCategory, Ministry, UserRole
 
 CONFIDENTIAL_CATEGORIES = frozenset({ComplaintCategory.HEALTH})
 
@@ -36,7 +41,10 @@ def create_complaint(
     next_num = (last.id + 1) if last else 1
     tracking_id = f"JUC-{next_num:03d}"
 
-    return Complaint.objects.create(
+    sla_days = getattr(settings, "COMPLAINT_SLA_DAYS", 7)
+    due_at = timezone.now() + timedelta(days=sla_days)
+
+    complaint = Complaint.objects.create(
         tracking_id=tracking_id,
         student=student,
         ministry=ministry,
@@ -45,7 +53,15 @@ def create_complaint(
         urgent=urgent,
         is_confidential=category in {c.value for c in CONFIDENTIAL_CATEGORIES},
         supporting_document_path=supporting_document_path,
+        due_at=due_at,
     )
+    log_complaint_activity(
+        complaint=complaint,
+        action="Submitted",
+        detail=f"Routed to {ministry.name}",
+        actor=student,
+    )
+    return complaint
 
 
 def username_from_reg(reg_number: str) -> str:
@@ -68,6 +84,7 @@ def create_portal_user(
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
+    email_verified = role != UserRole.STUDENT
     return User.objects.create_user(
         username=username_from_reg(reg_number),
         reg_number=reg_number.strip(),
@@ -79,4 +96,5 @@ def create_portal_user(
         ministry=ministry.strip(),
         phone_number=phone_number.strip(),
         must_change_password=must_change_password,
+        email_verified=email_verified,
     )
