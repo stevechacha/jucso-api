@@ -22,12 +22,13 @@ from core.models import (
     Suggestion,
     UserRole,
 )
-from core.permissions import IsAdminRole, IsLeader, IsStudent
+from core.permissions import AUTHENTICATED, IsAdminRole, IsLeader, IsStudent, PortalAccessPermission
 from core.querysets import complaints_for_user, suggestions_for_user
 from core.serializers import (
     AdminDocumentCreateSerializer,
     AdminUserSerializer,
     ClubSerializer,
+    ChangePasswordSerializer,
     ComplaintCreateSerializer,
     ComplaintSerializer,
     ComplaintUpdateSerializer,
@@ -109,10 +110,28 @@ class LoginView(views.APIView):
 
 
 class MeView(views.APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [*AUTHENTICATED]
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+
+
+class ChangePasswordView(views.APIView):
+    permission_classes = [*AUTHENTICATED]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={"user": request.user})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if not request.user.check_password(data["current_password"]):
+            return Response({"detail": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.set_password(data["new_password"])
+        request.user.must_change_password = False
+        request.user.save(update_fields=["password", "must_change_password"])
+
+        return Response({"detail": "Password updated successfully.", "user": UserSerializer(request.user).data})
 
 
 class StudentRegisterView(views.APIView):
@@ -182,12 +201,12 @@ class PasswordResetConfirmView(views.APIView):
 
 class MinistryListView(generics.ListAPIView):
     serializer_class = MinistrySerializer
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
     queryset = Ministry.objects.all().order_by("name")
 
 
 class AdminStaffCreateView(views.APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
 
     def post(self, request):
         serializer = StaffCreateSerializer(data=request.data)
@@ -203,13 +222,14 @@ class AdminStaffCreateView(views.APIView):
             role=data["role"],
             ministry=data.get("ministry", ""),
             phone_number=data.get("phone_number", ""),
+            must_change_password=True,
         )
 
         return Response(AdminUserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
 class ComplaintListCreateView(generics.ListCreateAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [*AUTHENTICATED]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_serializer_class(self):
@@ -222,7 +242,7 @@ class ComplaintListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsAuthenticated(), IsStudent()]
+            return [IsAuthenticated(), PortalAccessPermission(), IsStudent()]
         return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
@@ -259,7 +279,7 @@ class ComplaintListCreateView(generics.ListCreateAPIView):
 
 
 class ComplaintDetailView(generics.RetrieveUpdateAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [*AUTHENTICATED]
     lookup_field = "tracking_id"
     lookup_url_kwarg = "tracking_id"
 
@@ -273,12 +293,12 @@ class ComplaintDetailView(generics.RetrieveUpdateAPIView):
 
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
-            return [IsAuthenticated(), IsLeader()]
+            return [IsAuthenticated(), PortalAccessPermission(), IsLeader()]
         return super().get_permissions()
 
 
 class SuggestionListCreateView(generics.ListCreateAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [*AUTHENTICATED]
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -290,7 +310,7 @@ class SuggestionListCreateView(generics.ListCreateAPIView):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsAuthenticated(), IsStudent()]
+            return [IsAuthenticated(), PortalAccessPermission(), IsStudent()]
         return super().get_permissions()
 
     def perform_create(self, serializer):
@@ -312,7 +332,7 @@ class ClubListView(generics.ListAPIView):
 
 
 class ClubJoinView(views.APIView):
-    permission_classes = [IsAuthenticated, IsStudent]
+    permission_classes = [*AUTHENTICATED, IsStudent]
 
     @transaction.atomic
     def post(self, request, pk: int):
@@ -346,7 +366,7 @@ class EventListView(generics.ListAPIView):
 
 
 class EventRegisterView(views.APIView):
-    permission_classes = [IsAuthenticated, IsStudent]
+    permission_classes = [*AUTHENTICATED, IsStudent]
 
     @transaction.atomic
     def post(self, request, pk: int):
@@ -398,7 +418,7 @@ class ContactCreateView(generics.CreateAPIView):
 
 
 class ExecutiveStatsView(views.APIView):
-    permission_classes = [IsAuthenticated, IsLeader]
+    permission_classes = [*AUTHENTICATED, IsLeader]
 
     def get(self, request):
         complaints = Complaint.objects.all()
@@ -436,14 +456,14 @@ class ExecutiveStatsView(views.APIView):
 
 class AdminUsersView(generics.ListAPIView):
     serializer_class = AdminUserSerializer
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
 
     def get_queryset(self):
         return User.objects.all().order_by("reg_number")
 
 
 class AdminDocumentCreateView(views.APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
@@ -478,7 +498,7 @@ class AdminDocumentCreateView(views.APIView):
 
 
 class AdminOverviewView(views.APIView):
-    permission_classes = [IsAuthenticated, IsAdminRole]
+    permission_classes = [*AUTHENTICATED, IsAdminRole]
 
     def get(self, request):
         return Response(

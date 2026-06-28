@@ -9,6 +9,7 @@ urlpatterns = [
     path("auth/password-reset/", views.PasswordResetRequestView.as_view(), name="password-reset"),
     path("auth/password-reset/confirm/", views.PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
     path("auth/me/", views.MeView.as_view(), name="me"),
+    path("auth/change-password/", views.ChangePasswordView.as_view(), name="change-password"),
     path("complaints/", views.ComplaintListCreateView.as_view(), name="complaint-list"),
     path("complaints/<str:tracking_id>/", views.ComplaintDetailView.as_view(), name="complaint-detail"),
     path("suggestions/", views.SuggestionListCreateView.as_view(), name="suggestion-list"),

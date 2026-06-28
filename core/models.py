@@ -14,6 +14,7 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=UserRole.choices, default=UserRole.STUDENT)
     ministry = models.CharField(max_length=100, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
+    must_change_password = models.BooleanField(default=False)
 
     REQUIRED_FIELDS = ["email", "reg_number"]
 

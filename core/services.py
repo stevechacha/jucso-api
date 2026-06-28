@@ -60,6 +60,7 @@ def create_portal_user(
     role: str,
     ministry: str = "",
     phone_number: str = "",
+    must_change_password: bool = False,
 ):
     from django.contrib.auth import get_user_model
 
@@ -74,4 +75,5 @@ def create_portal_user(
         role=role,
         ministry=ministry.strip(),
         phone_number=phone_number.strip(),
+        must_change_password=must_change_password,
     )

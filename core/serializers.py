@@ -27,7 +27,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("reg_number", "name", "role", "ministry", "email", "phone_number")
+        fields = ("reg_number", "name", "role", "ministry", "email", "phone_number", "must_change_password")
         read_only_fields = fields
 
     def get_name(self, obj: User) -> str:
@@ -64,6 +64,16 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
     def validate_password(self, value: str) -> str:
         validate_password(value)
+        return value
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
+
+    def validate_new_password(self, value: str) -> str:
+        user = self.context.get("user")
+        validate_password(value, user)
         return value
 
 

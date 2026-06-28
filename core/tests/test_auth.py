@@ -113,3 +113,79 @@ class AuthFlowTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.student.refresh_from_db()
         self.assertTrue(self.student.check_password("NewSecurePass456!"))
+
+    def test_admin_created_staff_must_change_password(self):
+        admin = User.objects.create_user(
+            username="admin-001",
+            reg_number="ADMIN/001",
+            email="admin@jucso.ac.tz",
+            password="SecurePass123!",
+            first_name="System",
+            last_name="Admin",
+            role="admin",
+        )
+        self.client.force_authenticate(user=admin)
+        response = self.client.post(
+            "/api/admin/staff/",
+            {
+                "reg_number": "MIN/SPORT/002",
+                "first_name": "New",
+                "last_name": "Minister",
+                "email": "new.minister@jucso.ac.tz",
+                "password": "JUCSO-TempPass1!",
+                "role": "minister",
+                "ministry": "Sports",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        created = User.objects.get(reg_number="MIN/SPORT/002")
+        self.assertTrue(created.must_change_password)
+
+    def test_staff_with_temp_password_blocked_until_changed(self):
+        temp_user = User.objects.create_user(
+            username="min-sport-002",
+            reg_number="MIN/SPORT/003",
+            email="temp.minister@jucso.ac.tz",
+            password="JUCSO-TempPass1!",
+            first_name="Temp",
+            last_name="Minister",
+            role="minister",
+            ministry="Sports",
+            must_change_password=True,
+        )
+        self.client.force_authenticate(user=temp_user)
+        blocked = self.client.get("/api/complaints/")
+        self.assertEqual(blocked.status_code, status.HTTP_403_FORBIDDEN)
+
+        allowed = self.client.get("/api/auth/me/")
+        self.assertEqual(allowed.status_code, status.HTTP_200_OK)
+        self.assertTrue(allowed.json()["must_change_password"])
+
+    def test_change_password_clears_must_change_flag(self):
+        temp_user = User.objects.create_user(
+            username="exec-vice-002",
+            reg_number="EXEC/VICE/002",
+            email="temp.exec@jucso.ac.tz",
+            password="JUCSO-TempPass1!",
+            first_name="Temp",
+            last_name="Executive",
+            role="executive",
+            must_change_password=True,
+        )
+        self.client.force_authenticate(user=temp_user)
+        response = self.client.post(
+            "/api/auth/change-password/",
+            {"current_password": "JUCSO-TempPass1!", "new_password": "MyNewSecurePass789!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = response.json()
+        self.assertFalse(body["user"]["must_change_password"])
+        temp_user.refresh_from_db()
+        self.assertFalse(temp_user.must_change_password)
+        self.assertTrue(temp_user.check_password("MyNewSecurePass789!"))
+
+        self.client.force_authenticate(user=temp_user)
+        complaints = self.client.get("/api/complaints/")
+        self.assertEqual(complaints.status_code, status.HTTP_200_OK)
