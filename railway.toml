@@ -4,6 +4,6 @@ dockerfilePath = "Dockerfile"
 watchPatterns = ["**"]
 
 [deploy]
-startCommand = "sh -c \"python manage.py migrate && python manage.py seed_jucso && gunicorn jucso_api.wsgi:application --bind 0.0.0.0:${PORT:-8000}\""
+startCommand = "scripts/entrypoint.sh"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

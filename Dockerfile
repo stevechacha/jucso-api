@@ -15,9 +15,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+RUN chmod +x scripts/entrypoint.sh
+
 RUN DJANGO_SECRET_KEY=build-only DEBUG=false \
     python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
-CMD sh -c "python manage.py migrate && python manage.py seed_jucso && gunicorn jucso_api.wsgi:application --bind 0.0.0.0:${PORT:-8000}"
+CMD ["scripts/entrypoint.sh"]

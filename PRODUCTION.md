@@ -1,0 +1,144 @@
+# JUCSO Production Checklist
+
+Use this before opening the portal to real students and staff.
+
+## Launch readiness
+
+| Item | Status | Action |
+|------|--------|--------|
+| Pilot / UAT | Ready | Core flows work on Railway |
+| Full campus production | Not yet | Complete blockers below |
+
+---
+
+## 1. Railway — API (`jucso-api`)
+
+### Required variables
+
+| Variable | Production value |
+|----------|------------------|
+| `DEBUG` | `false` |
+| `DJANGO_SECRET_KEY` | Long random string (`openssl rand -base64 48`) |
+| `ALLOWED_HOSTS` | `jucso-api-production.up.railway.app,.railway.app` |
+| `DATABASE_URL` | Reference from PostgreSQL service |
+| `CORS_ALLOWED_ORIGINS` | `https://jucso-web-production.up.railway.app` |
+| `CSRF_TRUSTED_ORIGINS` | `https://jucso-web-production.up.railway.app,https://jucso-api-production.up.railway.app` |
+| `SECURE_SSL_REDIRECT` | `false` (Railway terminates SSL at the proxy) |
+| `SEED_DATA` | `false` after initial setup |
+
+### Seed data (one-time only)
+
+1. Set `SEED_DATA=true` on Railway API service
+2. Redeploy once to load ministries, demo users, and sample content
+3. Set `SEED_DATA=false` immediately and redeploy again
+
+Or run manually in Railway shell:
+
+```bash
+python manage.py seed_jucso
+```
+
+**Never** leave `SEED_DATA=true` in production after go-live. Deploys no longer auto-seed by default.
+
+### First-time admin password
+
+After seeding, change the default admin password:
+
+```bash
+python manage.py changepassword ADMIN/001
+```
+
+Or create a new admin via Django admin and deactivate `ADMIN/001`.
+
+### Health checks
+
+- `GET /` → `{"status":"ok",...}`
+- `GET /api/health/` → `{"status":"ok","service":"jucso-api"}`
+
+Monitor with [UptimeRobot](https://uptimerobot.com) or similar on `/api/health/`.
+
+---
+
+## 2. Railway — Web (`jucso-web`)
+
+| Variable | Value |
+|----------|--------|
+| `VITE_API_URL` | `https://jucso-api-production.up.railway.app` |
+
+Redeploy after changing `VITE_API_URL` (it is baked in at build time).
+
+---
+
+## 3. Security before go-live
+
+- [ ] `DEBUG=false` on API
+- [ ] Strong `DJANGO_SECRET_KEY` (not the example value)
+- [ ] `SEED_DATA=false` on API
+- [ ] Change or remove demo accounts (`ADMIN/001`, `JUC/2024/001`, ministers)
+- [ ] Confirm demo login hints are hidden in production build
+- [ ] Enable Railway PostgreSQL automated backups
+- [ ] Restrict `CORS_ALLOWED_ORIGINS` to your real web URL only
+
+---
+
+## 4. Known gaps (post-pilot)
+
+| Feature | Status |
+|---------|--------|
+| Forgot / reset password | Not built |
+| Email / SMS notifications | Not built |
+| Admin news & document upload | UI only |
+| Complaint file attachments | Model only; needs object storage |
+| Automated tests | Not added |
+| JWT refresh flow in web | Access token only in localStorage |
+| File uploads on Railway | Ephemeral disk — use S3/R2 before enabling uploads |
+
+---
+
+## 5. Smoke test (after deploy)
+
+Run locally before release:
+
+```bash
+cd jucso-api
+python manage.py test core.tests -v 2
+```
+
+CI runs the same suite on push via `.github/workflows/api-tests.yml`.
+
+### Manual production checks
+
+1. Open `https://jucso-web-production.up.railway.app`
+2. Register a new student (new reg number + email)
+3. Land on `/dashboard` with portal navbar (no marketing links)
+4. Submit a complaint → appears in "My Complaints"
+5. Sign out → public site returns
+6. Staff login with minister PF number → minister dashboard
+7. Admin login → users table, add staff form works
+
+---
+
+## 6. Rollback
+
+Railway: redeploy a previous successful deployment from the service **Deployments** tab.
+
+Database: restore from PostgreSQL backup if a bad migration ran.
+
+---
+
+## 7. Local production-like test
+
+```bash
+# API
+cd jucso-api
+cp .env.example .env
+# Edit .env with local Postgres or SQLite (omit DATABASE_URL for SQLite)
+python manage.py migrate
+SEED_DATA=true python manage.py seed_jucso  # or: SEED_DATA=true in .env + entrypoint
+python manage.py runserver 8000
+
+# Web
+cd jucso-web
+echo "VITE_API_URL=http://localhost:8000" > .env
+npm run dev
+```

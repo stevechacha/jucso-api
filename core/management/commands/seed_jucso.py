@@ -38,10 +38,18 @@ USERS = [
 
 
 class Command(BaseCommand):
-    help = "Seed ministries, demo users, and sample portal data"
+    help = "Seed ministries, demo users, and sample portal data (safe to re-run; does not reset existing passwords)"
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--reset-demo-passwords",
+            action="store_true",
+            help="Reset demo account passwords to demo123 (development only).",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
+        reset_passwords = options["reset_demo_passwords"]
         ministries = {}
         for ministry_name in set(CATEGORY_TO_MINISTRY.values()):
             ministry, _ = Ministry.objects.get_or_create(
@@ -68,9 +76,10 @@ class Command(BaseCommand):
                 user.set_password(DEMO_PASSWORD)
                 user.save()
                 self.stdout.write(f"Created user {reg}")
-            else:
+            elif reset_passwords:
                 user.set_password(DEMO_PASSWORD)
                 user.save(update_fields=["password"])
+                self.stdout.write(f"Reset password for demo user {reg}")
 
         students = {u.reg_number: u for u in User.objects.filter(role=UserRole.STUDENT)}
 
