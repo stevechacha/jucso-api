@@ -198,3 +198,18 @@ class AdditionalFeaturesTests(TestCase):
         self.assertGreaterEqual(len(response.data), 1)
         self.assertIn("category", response.data[0])
         self.assertIn("ministry", response.data[0])
+
+    def test_transparency_stats_include_suggestions(self):
+        from core.models import Suggestion, SuggestionStatus
+
+        Suggestion.objects.create(
+            student=self.student,
+            title="Library hours",
+            description="Extend hours",
+            status=SuggestionStatus.RECEIVED,
+        )
+        response = self.client.get("/api/stats/transparency/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("total_suggestions", response.data)
+        self.assertIn("suggestion_review_rate", response.data)
+        self.assertGreaterEqual(response.data["total_suggestions"], 1)

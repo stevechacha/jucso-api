@@ -23,6 +23,7 @@ from core.models import (
     Ministry,
     NewsItem,
     Suggestion,
+    SuggestionStatus,
     UserRole,
 )
 from core.permissions import AUTHENTICATED, IsAdminRole, IsLeader, IsStudent, PortalAccessPermission
@@ -659,6 +660,9 @@ class TransparencyStatsView(views.APIView):
 
         total = complaints.count()
         resolved = complaints.filter(status=ComplaintStatus.RESOLVED).count()
+        all_suggestions = Suggestion.objects.all()
+        total_suggestions = all_suggestions.count()
+        implemented_suggestions = all_suggestions.filter(status=SuggestionStatus.IMPLEMENTED).count()
         return Response(
             {
                 "total_complaints": total,
@@ -666,6 +670,12 @@ class TransparencyStatsView(views.APIView):
                 "open_complaints": complaints.exclude(status=ComplaintStatus.RESOLVED).count(),
                 "resolution_rate": round((resolved / total) * 100) if total else 0,
                 "ministry_stats": ministry_stats,
+                "total_suggestions": total_suggestions,
+                "implemented_suggestions": implemented_suggestions,
+                "pending_suggestions": all_suggestions.exclude(status=SuggestionStatus.IMPLEMENTED).count(),
+                "suggestion_review_rate": round((implemented_suggestions / total_suggestions) * 100)
+                if total_suggestions
+                else 0,
             }
         )
 
